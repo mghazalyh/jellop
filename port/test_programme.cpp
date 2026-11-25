@@ -17,22 +17,22 @@ static JFChannel parse(const char *json) {
 }
 
 int main() {
-    const char *provider = R"({"Items":[{"Id":"abc","Name":"Channel","CurrentProgram":{"Name":"Movie (2020)","JealousfinProgramme":{"title":"Movie","source":"provider-catalogue","observedAt":1795620000.125,"year":2020}}}],"TotalRecordCount":1})";
+    const char *provider = R"JSON({"Items":[{"Id":"abc","Name":"Channel","CurrentProgram":{"Name":"Movie (2020)","JealousfinProgramme":{"title":"Movie","source":"provider-catalogue","observedAt":1795620000.125,"year":2020}}}],"TotalRecordCount":1})JSON";
     JFChannel c = parse(provider);
     assert(!strcmp(c.now_title,"Movie (2020)"));
     assert(c.now_start_ticks == 0 && c.now_end_ticks == 0);
     assert(livetv_current_title_valid(&c,jf_ticks_from_unix(1795620001)));
     assert(!livetv_current_title_valid(&c,jf_ticks_from_unix(1795620150)));
-    const char *guide = R"({"Items":[{"Id":"abc","CurrentProgram":{"Name":"Scheduled: Film (1992)","JealousfinProgramme":{"source":"corroborated-external-schedule","observedAt":1795620000}}}]})";
+    const char *guide = R"JSON({"Items":[{"Id":"abc","CurrentProgram":{"Name":"Scheduled: Film (1992)","JealousfinProgramme":{"source":"corroborated-external-schedule","observedAt":1795620000}}}]})JSON";
     c = parse(guide);
     assert(!strcmp(c.now_title,"Film (1992)"));
     assert(livetv_current_title_valid(&c,jf_ticks_from_unix(1795621799)));
     assert(!livetv_current_title_valid(&c,jf_ticks_from_unix(1795621800)));
-    c = parse(R"({"Items":[{"Id":"abc","CurrentProgram":{"Name":"Bad","JealousfinProgramme":{"source":"unknown","observedAt":1795620000}}}]})");
+    c = parse(R"JSON({"Items":[{"Id":"abc","CurrentProgram":{"Name":"Bad","JealousfinProgramme":{"source":"unknown","observedAt":1795620000}}}]})JSON");
     assert(!livetv_current_title_valid(&c,jf_ticks_from_unix(1795620001)));
-    c = parse(R"({"Items":[{"Id":"abc","CurrentProgram":{"Name":"Undated ordinary item"}}]})");
+    c = parse(R"JSON({"Items":[{"Id":"abc","CurrentProgram":{"Name":"Undated ordinary item"}}]})JSON");
     assert(!livetv_current_title_valid(&c,jf_ticks_from_unix(1795620001)));
-    c = parse(R"({"Items":[{"Id":"abc","CurrentProgram":{"Name":"Regular EPG","StartDate":"2026-11-25T00:00:00Z","EndDate":"2026-11-26T00:00:00Z"}}]})");
+    c = parse(R"JSON({"Items":[{"Id":"abc","CurrentProgram":{"Name":"Regular EPG","StartDate":"2026-11-25T00:00:00Z","EndDate":"2026-11-26T00:00:00Z"}}]})JSON");
     assert(livetv_current_title_valid(&c,jf_ticks_from_iso8601("2026-11-25T23:59:59Z")));
     assert(!livetv_current_title_valid(&c,jf_ticks_from_iso8601("2026-11-26T00:00:00Z")));
     assert(!livetv_current_title_valid(NULL,1));
