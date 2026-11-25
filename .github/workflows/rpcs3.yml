@@ -53,7 +53,7 @@ jobs:
       - name: Install graphical runtime dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y xvfb xauth libgl1-mesa-dri libglx-mesa0 libegl1 libxkbcommon-x11-0 libxcb-cursor0 libxcb-xinerama0 libxcb-icccm4 libxcb-keysyms1 libxcb-render-util0 libasound2t64 libpulse0 ffmpeg imagemagick
+          sudo apt-get install -y xvfb xauth libgl1-mesa-dri libglx-mesa0 libopengl0 libegl1 libxkbcommon-x11-0 libxcb-cursor0 libxcb-xinerama0 libxcb-icccm4 libxcb-keysyms1 libxcb-render-util0 libasound2t64 libpulse0 ffmpeg imagemagick
       - name: Download pinned RPCS3 and official firmware
         run: |
           set -euo pipefail
@@ -71,7 +71,9 @@ jobs:
         run: |
           mkdir -p "$XDG_CONFIG_HOME/rpcs3" "$XDG_CACHE_HOME" "$XDG_DATA_HOME" smoke
           printf 'Video:\n  Renderer: Null\nAudio:\n  Renderer: Null\n' > "$XDG_CONFIG_HOME/rpcs3/config.yml"
-          timeout 420 "$RUNNER_TEMP/squashfs-root/AppRun" --headless --installfw "$RUNNER_TEMP/PS3UPDAT.PUP" --installpkg "$PWD/dist/Jellop-RPCS3.pkg" > smoke/install.log 2>&1
+          set -o pipefail
+          timeout 30 "$RUNNER_TEMP/squashfs-root/AppRun" --headless --version 2>&1 | tee smoke/version.log
+          timeout 420 "$RUNNER_TEMP/squashfs-root/AppRun" --headless --installfw "$RUNNER_TEMP/PS3UPDAT.PUP" --installpkg "$PWD/dist/Jellop-RPCS3.pkg" 2>&1 | tee smoke/install.log
           test -f "$XDG_CONFIG_HOME/rpcs3/dev_hdd0/game/JELP30001/USRDIR/EBOOT.BIN"
       - name: Actual graphical playback and Surf transition
         run: |
