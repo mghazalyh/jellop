@@ -81,6 +81,7 @@ jobs:
             timeout 420 "$RUNNER_TEMP/squashfs-root/AppRun" --headless "$mode" "$input" > "smoke/$mode.stdout.log" 2>&1 || rc=$?
             cat "smoke/$mode.stdout.log"
             local log="$XDG_CACHE_HOME/rpcs3/RPCS3.log"
+            touch "smoke/$mode.rpcs3.log" "smoke/$mode.rpcs3.previous.log"
             if test -f "$log"; then cp "$log" "smoke/$mode.rpcs3.log"; fi
             if test -f "$log.gz"; then gzip -cd "$log.gz" > "smoke/$mode.rpcs3.previous.log" || true; fi
             if ! grep -aE "$success" "smoke/$mode.stdout.log" "smoke/$mode.rpcs3.log" "smoke/$mode.rpcs3.previous.log" 2>/dev/null; then
