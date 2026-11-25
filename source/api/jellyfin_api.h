@@ -255,6 +255,10 @@ void jellyfin_report_playing(const char *item_id, const char *session_id,
 void jellyfin_report_progress(const char *item_id, const char *session_id,
                               unsigned long long pos_ticks, bool paused,
                               const char *live_stream_id = NULL);
+void jellyfin_report_live_evidence(const char *item_id,const char *session_id,
+                                    bool paused,unsigned frames,unsigned decoded_ms,
+                                    unsigned stalls,unsigned free_kib,unsigned ring_packets,
+                                    unsigned ring_capacity);
 void jellyfin_report_stopped(const char *item_id, const char *session_id,
                              unsigned long long pos_ticks,
                              const char *live_stream_id = NULL);

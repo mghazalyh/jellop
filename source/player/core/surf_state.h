@@ -77,7 +77,7 @@ static inline SurfCheckpoint surf_restore(const SurfStore *s,uint64_t scope,cons
         if(c.pool!=p->fingerprint){c.pool=p->fingerprint;surf_next_cycle(&c);}
         break;
     }
-    if(!id||strcmp(c.channel,id)||surf_rank(p,id)<0)c.remaining=60;
+    if(!id||strcmp(c.channel,id)||surf_rank(p,id)<0||c.remaining>60)c.remaining=60;
     if(surf_id_ok(id))snprintf(c.channel,sizeof c.channel,"%s",id);
     return c;
 }

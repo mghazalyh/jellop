@@ -19,7 +19,7 @@
 // given, is also written into the report.
 static void post_playstate(const char *endpoint, const char *item_id,
                            const char *session_id, u64 pos_ticks, bool paused,
-                           bool live, const char *live_stream_id) {
+                           bool live, const char *live_stream_id, const char *evidence = "") {
     if (!g_server[0] || !g_token[0] || !item_id || !item_id[0]) return;
 
     char url[512];
@@ -31,14 +31,14 @@ static void post_playstate(const char *endpoint, const char *item_id,
     if (live_stream_id && live_stream_id[0])
         snprintf(live_field, sizeof live_field, ",\"LiveStreamId\":\"%.100s\"", live_stream_id);
 
-    char body[640];
+    char body[896];
     snprintf(body, sizeof(body),
         "{\"ItemId\":\"%s\",\"PlaySessionId\":\"%s\","
         "\"PositionTicks\":%llu,\"IsPaused\":%s,"
-        "\"PlayMethod\":\"Transcode\",\"CanSeek\":%s%s}",
+        "\"PlayMethod\":\"Transcode\",\"CanSeek\":%s%s%s}",
         item_id, session_id ? session_id : "",
         (unsigned long long)(live ? 0ULL : pos_ticks), paused ? "true" : "false",
-        live ? "false" : "true", live_field);
+        live ? "false" : "true", live_field, evidence);
 
     char resp[256];
     int status = http_request(HTTP_POST, url, body, g_token, resp, sizeof(resp));
@@ -88,6 +88,19 @@ void jellyfin_report_progress(const char *item_id, const char *session_id,
                               const char *live_stream_id) {
     post_playstate("/Sessions/Playing/Progress", item_id, session_id,
                    pos_ticks, paused, is_live(live_stream_id), NULL);
+}
+
+void jellyfin_report_live_evidence(const char *item_id,const char *session_id,
+                                    bool paused,unsigned frames,unsigned decoded_ms,
+                                    unsigned stalls,unsigned free_kib,unsigned ring_packets,
+                                    unsigned ring_capacity) {
+    char evidence[256];
+    int n=snprintf(evidence,sizeof evidence,
+        ",\"JellopEvidence\":{\"Version\":1,\"Frames\":%u,\"DecodedMs\":%u,"
+        "\"Stalls\":%u,\"FreeKiB\":%u,\"RingPackets\":%u,\"RingCapacity\":%u}",
+        frames,decoded_ms,stalls,free_kib,ring_packets,ring_capacity);
+    if(n<=0||n>=(int)sizeof evidence)return;
+    post_playstate("/Sessions/Playing/Progress",item_id,session_id,0,paused,true,NULL,evidence);
 }
 
 void jellyfin_report_stopped(const char *item_id, const char *session_id,

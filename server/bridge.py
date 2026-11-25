@@ -135,6 +135,7 @@ class Bridge:
         self.lock=threading.Lock()
         self.catalogues=OrderedDict()
         self.sessions=OrderedDict()
+        self.evidence=OrderedDict()
         self.transcode=threading.BoundedSemaphore(1)
 
     def upstream(self,path,token="",method="GET",body=None):
@@ -199,6 +200,64 @@ class Bridge:
             self.sessions.move_to_end((token,cid,sid))
             while len(self.sessions)>16:self.sessions.popitem(last=False)
 
+    def stream_started(self,token,cid,sid):
+        with self.lock:
+            key=(token,cid,sid)
+            self.evidence[key]={"active":True,"opened":time.monotonic(),"samples":0,
+                                "sustained":False,"last":None,"run_seconds":0.0}
+            self.evidence.move_to_end(key)
+            while len(self.evidence)>24:self.evidence.popitem(last=False)
+
+    def stream_finished(self,token,cid,sid,reason):
+        with self.lock:
+            row=self.evidence.get((token,cid,sid))
+            if row:row.update(active=False,outcome=reason)
+
+    def report_evidence(self,token,data):
+        if not isinstance(data,dict):return
+        e=data.get("JellopEvidence")
+        cid,sid=data.get("ItemId"),data.get("PlaySessionId")
+        if not isinstance(cid,str) or not isinstance(sid,str) or not re.fullmatch(ID,cid) or not re.fullmatch(ID,sid):
+            return
+        if not isinstance(e,dict) or e.get("Version")!=1:return
+        fields=("Frames","DecodedMs","Stalls","FreeKiB","RingPackets","RingCapacity")
+        if any(type(e.get(k)) is not int or not 0<=e[k]<=0xffffffff for k in fields):return
+        if e["RingPackets"]>e["RingCapacity"] or e["RingCapacity"]>40000:return
+        if type(data.get("IsPaused")) is not bool:return
+        now=time.monotonic()
+        sample={k:e[k] for k in fields}
+        sample["paused"]=data["IsPaused"];sample["at"]=now
+        with self.lock:
+            row=self.evidence.get((token,cid,sid))
+            if not row or not row["active"]:return
+            # This is evidence of displayed frame progress, not merely
+            # downloaded bytes. A delayed/duplicated/reset sample is not
+            # credited. Local decode stalls do not mutate global policy.
+            last=row["last"]
+            if last:
+                dt=now-last["at"]
+                frames=sample["Frames"]-last["Frames"]
+                decoded=sample["DecodedMs"]-last["DecodedMs"]
+                if dt<2:return
+                if (dt<=25 and not sample["paused"] and not last["paused"] and
+                    sample["Stalls"]==last["Stalls"] and 0<frames<=dt*65 and
+                    dt*500<=decoded<=dt*1200):
+                    row["run_seconds"]+=min(dt,decoded/1000)
+                else:row["run_seconds"]=0.0
+            row["samples"]+=1
+            row["last"]=sample
+            if row["run_seconds"]>=60:row["sustained"]=True
+
+    def diagnostics(self,token):
+        self.catalogue(token,fresh=True)
+        with self.lock:
+            return {"Sessions":[{"ChannelId":cid,"PlaySessionId":sid,
+                    "Active":r["active"],"Samples":r["samples"],"Sustained":r["sustained"],
+                    "HealthySeconds":round(r["run_seconds"],2),"Outcome":r.get("outcome","playing"),
+                    "Last":{k:v for k,v in (r["last"] or {}).items() if k!="at"}}
+                for (owner,cid,sid),r in self.evidence.items() if owner==token],
+                "PolicyMutation":False}
+
     def dispatch(self,method,path,q,headers,body):
         if path=="/System/Info/Public" and method=="GET":
             return self.upstream(path)
@@ -206,6 +265,7 @@ class Bridge:
         if path=="/Users/AuthenticateByName" and method=="POST":
             return self.upstream(path,method=method,body=body)
         token=client_token(headers,q)
+        if path=="/Jellop/Diagnostics" and method=="GET":return self.diagnostics(token)
         if path=="/LiveTv/Channels" and method=="GET":
             return page_rows(filtered_channels(self.catalogue(token),q),q)
         if re.fullmatch(r"/Users/[^/]+/Views",path) and method=="GET":
@@ -249,6 +309,14 @@ class Bridge:
             with self.lock:self.catalogues.pop(token,None)
             return result
         if path in ("/Sessions/Playing","/Sessions/Playing/Progress","/Sessions/Playing/Stopped","/LiveStreams/Close") and method=="POST":
+            if path=="/Sessions/Playing/Progress" and body:
+                try:
+                    data=json.loads(body)
+                    if isinstance(data,dict):
+                        self.report_evidence(token,data)
+                        data.pop("JellopEvidence",None)
+                        body=json.dumps(data,separators=(",",":")).encode()
+                except (ValueError,TypeError):raise Failure(400,"invalid-progress") from None
             return self.upstream(path,token,method,body or b"{}")
         if path=="/Sessions/Logout" and method=="POST":
             self.catalogue(token,fresh=True)
@@ -287,9 +355,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
         token=client_token(self.headers,q)
         if not b.transcode.acquire(blocking=False):
             raise Failure(503,"transcode-capacity")
-        proc=None;started=False
+        proc=None;started=False;sid="";reason="startup-error"
         try:
-            _,source=b.resolve(token,cid,session=first(q,"PlaySessionId"))
+            sid,source=b.resolve(token,cid,session=first(q,"PlaySessionId"))
             proc=subprocess.Popen(ffmpeg_args(b.binary,source,q),stdin=subprocess.DEVNULL,
                                   stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,bufsize=0)
             with selectors.DefaultSelector() as sel:
@@ -297,28 +365,33 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 while True:
                     if not sel.select(timeout=25 if not started else 15):
                         if not started:raise Failure(504,"transcode-startup-timeout")
-                        break
+                        reason="transcode-output-timeout";break
                     chunk=os.read(proc.stdout.fileno(),STREAM_CHUNK)
                     if not chunk:
                         if not started:raise Failure(502,"transcode-no-output")
-                        break
+                        reason="transcode-ended";break
                     if not started:
                         self.send_response(200)
                         self.send_header("Content-Type","video/mp2t")
                         self.send_header("Cache-Control","no-store")
                         self.send_header("Connection","close")
                         self.end_headers()
+                        b.stream_started(token,cid,sid)
                         started=True
                     self.wfile.write(chunk)
         except (BrokenPipeError,ConnectionResetError):
-            pass
+            reason="client-disconnected"
         except TimeoutError:
+            reason="client-or-network-timeout"
             if not started:raise Failure(504,"transcode-startup-timeout") from None
         except OSError:
+            reason="transport-or-transcoder-error"
             if not started:raise Failure(502,"transcode-unavailable") from None
         finally:
             try:stop_process(proc)
-            finally:b.transcode.release()
+            finally:
+                if started:b.stream_finished(token,cid,sid,reason)
+                b.transcode.release()
     def handle_api(self):
         try:
             p=url.urlsplit(self.path)

@@ -572,7 +572,16 @@ void progress_thread_fn(void *arg) {
         snprintf(sess, sizeof sess, "%s", g_prog.sess);   // re-minted per seek
         snprintf(item, sizeof item, "%s", g_prog.item);   // a live channel changes
         snprintf(live_id, sizeof live_id, "%s", g_prog.live_id);
-        jellyfin_report_progress(item, sess, pos_ticks, g_prog.paused, live_id);
+        if(g_prog.live){
+            const u32 seq=g_prog.evidence_seq;
+            __sync_synchronize();
+            const u32 frames=g_prog.evidence_frames,ms=g_prog.evidence_ms,stalls=g_prog.evidence_stalls;
+            const u32 free=g_prog.evidence_free,ring=g_prog.evidence_ring,capacity=g_prog.evidence_capacity;
+            __sync_synchronize();
+            if(!(seq&1)&&seq==g_prog.evidence_seq&&PROG_LIVE()&&g_prog.pos_valid&&
+                !strcmp(item,g_prog.item)&&!strcmp(sess,g_prog.sess))
+                jellyfin_report_live_evidence(item,sess,g_prog.paused,frames,ms,stalls,free,ring,capacity);
+        }else jellyfin_report_progress(item, sess, pos_ticks, g_prog.paused, live_id);
     }
     #undef PROG_LIVE
 

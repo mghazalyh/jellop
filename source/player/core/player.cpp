@@ -66,6 +66,7 @@
 #include "live_watch.h"   // Live TV: when to ask for a fresh stream
 #include "surf_clock.h"
 #include "surf_state.h"
+#include "live_evidence.h"
 #include "http.h"         // a channel PlaybackInfo may take longer than 24 s
 
 extern void crash_log(const char *msg);
@@ -1526,6 +1527,9 @@ void show_player_run(const JFItem *item, u32 resume_secs,
     g_prog.playing   = false;
     g_prog.gen       = g_prog.gen + 1;
     g_prog.live        = live;
+    g_prog.evidence_seq=0;
+    g_prog.evidence_frames=g_prog.evidence_ms=g_prog.evidence_stalls=0;
+    g_prog.evidence_free=g_prog.evidence_ring=g_prog.evidence_capacity=0;
     g_prog.guide_ready = false;
     s_live_next[0]     = '\0';
     snprintf(g_prog.item, sizeof g_prog.item, "%s", item->id);
@@ -1605,6 +1609,9 @@ void show_player_run(const JFItem *item, u32 resume_secs,
     SurfStore surf_store={};
     SurfCheckpoint surf_checkpoint={};
     bool surf_pool_valid=false,surf_confirmed=false;
+    LiveEvidence evidence;
+    live_evidence_reset(&evidence,timing_get_us(),ps.frame_count);
+    u64 evidence_published=0;
     u64 surf_saved_us=0;
     if(live){
         const int count=xmb_livetv_count();
@@ -1822,6 +1829,21 @@ void show_player_run(const JFItem *item, u32 resume_secs,
         bool        live_changed = false;
         if (live) {
             const u64 now_lv = timing_get_us();
+            live_evidence_step(&evidence,now_lv,ps.frame_count,ps.paused||g_sys_overlay||live_target>=0);
+            if(now_lv-evidence_published>=1000000ULL){
+                g_prog.evidence_seq++;
+                __sync_synchronize();
+                g_prog.evidence_frames=evidence.frames;
+                const u64 ms=evidence.decoded_us/1000ULL;
+                g_prog.evidence_ms=ms>0xffffffffULL?0xffffffffu:(u32)ms;
+                g_prog.evidence_stalls=evidence.stalls;
+                g_prog.evidence_free=meminfo_avail_kb();
+                g_prog.evidence_ring=decode_ring_fill();
+                g_prog.evidence_capacity=decode_ring_cap();
+                __sync_synchronize();
+                g_prog.evidence_seq++;
+                evidence_published=now_lv;
+            }
             if (BTN_PRESSED(l3) && !hud_menu_open() && !g_sys_overlay && surf_pool_valid) {
                 const bool was_off=surf_clock.mode==SURF_OFF;
                 surf_clock_toggle(&surf_clock,now_lv,ps.frame_count);
@@ -1960,6 +1982,12 @@ void show_player_run(const JFItem *item, u32 resume_secs,
                 snprintf(g_prog.item, sizeof g_prog.item, "%s", item->id);
                 snprintf(g_prog.live_id, sizeof g_prog.live_id, "%s", ps.source.live_stream_id);
                 live_watch_opened(&live_w, timing_get_us());
+                live_evidence_reset(&evidence,timing_get_us(),ps.frame_count);
+                g_prog.evidence_seq++;
+                __sync_synchronize();
+                g_prog.evidence_frames=g_prog.evidence_ms=g_prog.evidence_stalls=0;
+                __sync_synchronize();g_prog.evidence_seq++;
+                evidence_published=0;
                 if (live_changed) {
                     surf_clock_new_channel(&surf_clock,timing_get_us(),ps.frame_count);
                     surf_confirmed=false;

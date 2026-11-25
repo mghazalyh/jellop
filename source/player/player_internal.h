@@ -66,6 +66,10 @@ struct ProgressShared {
     // never waits on the network.  It fills these only while guide_ready is
     // false and sets it last; the display loop reads them and clears it.
     volatile bool live;
+    // Published once per second; even sequence = stable snapshot.
+    volatile u32 evidence_seq;
+    volatile u32 evidence_frames,evidence_ms,evidence_stalls;
+    volatile u32 evidence_free,evidence_ring,evidence_capacity;
     volatile bool guide_ready;
     char          guide_channel[40];
     char          guide_now[128];
