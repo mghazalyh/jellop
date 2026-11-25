@@ -5,7 +5,9 @@
 
 #include <stdio.h>
 #include <string.h>
+#ifndef JELLOP_HOST_TEST
 #include <sys/file.h>   // sysLv2FsMkdir
+#endif
 
 // Where config / device id / settings live.  This differs by target:
 //
@@ -51,10 +53,12 @@ static char s_user_dir[128];
 static bool s_user_on = false;
 
 void jf_paths_init(void) {
+#ifndef JELLOP_HOST_TEST
     sysLv2FsMkdir(JELLOP_TMP_DIR, 0755);
 #if BUILD_FOR_RPCS3
     sysLv2FsMkdir("/dev_hdd0/game/JELP30001", 0755);
     sysLv2FsMkdir(JF_DATA_DIR, 0755);
+#endif
 #endif
 }
 

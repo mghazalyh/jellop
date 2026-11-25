@@ -16,7 +16,7 @@ CXX     ?= c++
 CFLAGS  ?= -O2 -Wall
 CFLAGS  += -I../source/audio -I../source/audio/a52 -I../source/util -I../source/i18n
 CXXFLAGS ?= -O2 -Wall
-CXXFLAGS += -I../source/api -I../source/net -I../source/i18n
+CXXFLAGS += -DJELLOP_HOST_TEST -I../source/api -I../source/net -I../source/i18n
 
 A52_DIR  = ../source/audio/a52
 A52_SRCS = $(A52_DIR)/parse.c $(A52_DIR)/bit_allocate.c $(A52_DIR)/bitstream.c \

@@ -39,7 +39,7 @@
 #define UPDATE_URL "https://api.github.com/repos/" UPDATE_REPO "/releases/latest"
 #define UPDATE_TIMEOUT_US (2 * 1000 * 1000)
 
-#define UPDATE_LOG_PATH "/dev_hdd0/tmp/update_detection.txt"
+#define UPDATE_LOG_PATH JELLOP_TMP_DIR "/update_detection.txt"
 
 static sys_ppu_thread_t s_thread  = 0;
 static bool             s_started = false;

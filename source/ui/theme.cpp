@@ -28,7 +28,7 @@ extern void crash_log(const char *msg);
 // is where a user drops their own theme over FTP without rebuilding the pkg.
 static const char *THEME_DIRS[] = {
     "/dev_hdd0/game/JELP30001/USRDIR/themes",
-    "/dev_hdd0/tmp/themes",
+    JELLOP_TMP_DIR "/themes",
 };
 #define THEME_DIR_COUNT ((int)(sizeof(THEME_DIRS) / sizeof(THEME_DIRS[0])))
 

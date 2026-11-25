@@ -28,6 +28,7 @@
 #include <sys/prx.h>
 
 #include "avconf_capture.h"
+#include "jf_paths.h"
 #include "plog.h"
 
 // CELL_SYSMODULE_AVCONF_EXT.  PSL1GHT's enum has no name for it; the value is
@@ -36,10 +37,10 @@
 // SAVEDATA 0x33.
 #define JF_SYSMODULE_AVCONF_EXT 0x31
 
-#define CAP_FLAG   "/dev_hdd0/tmp/jellyfin_fwcapture.txt"
-#define CAP_START  "/dev_hdd0/tmp/jf_fwcap_started.txt"
-#define CAP_INDEX  "/dev_hdd0/tmp/jf_fwcap_index.txt"
-#define CAP_PREFIX "/dev_hdd0/tmp/jf_fwcap_"
+#define CAP_FLAG   JELLOP_TMP_DIR "/jellyfin_fwcapture.txt"
+#define CAP_START  JELLOP_TMP_DIR "/jf_fwcap_started.txt"
+#define CAP_INDEX  JELLOP_TMP_DIR "/jf_fwcap_index.txt"
+#define CAP_PREFIX JELLOP_TMP_DIR "/jf_fwcap_"
 
 extern "C" {
 // avconf_stub.S -- slots the loader fills with OPD addresses.

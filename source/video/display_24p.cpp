@@ -28,6 +28,7 @@
 #include <rsx/gcm_sys.h>
 
 #include "i18n.h"
+#include "jf_paths.h"
 #include "display_24p.h"
 #include "display_mode.h"
 #include "display_diag.h"
@@ -37,10 +38,10 @@
 #include "lclog.h"
 #include "audio_bitstream.h"   // the 6ch configure a mode change undoes
 
-#define F_ENABLE    "/dev_hdd0/tmp/jellyfin_24p.txt"     // "1" = on
-#define F_CONFIRMED "/dev_hdd0/tmp/jf_24p_confirmed.txt" // "1" seen, "0" not
-#define F_PENDING   "/dev_hdd0/tmp/jf_24p_pending.txt"   // abort marker
-#define F_MAP       "/dev_hdd0/tmp/jf_24p_map.txt"       // bit -> measured clock
+#define F_ENABLE    JELLOP_TMP_DIR "/jellyfin_24p.txt"     // "1" = on
+#define F_CONFIRMED JELLOP_TMP_DIR "/jf_24p_confirmed.txt" // "1" seen, "0" not
+#define F_PENDING   JELLOP_TMP_DIR "/jf_24p_pending.txt"   // abort marker
+#define F_MAP       JELLOP_TMP_DIR "/jf_24p_map.txt"       // bit -> measured clock
 
 #define JF_SYSMODULE_AVCONF_EXT 0x31      // see avconf_capture.cpp
 #define GCM_FREQ_59_94HZ  1               // CELL_GCM_DISPLAY_FREQUENCY_*

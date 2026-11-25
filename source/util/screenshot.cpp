@@ -14,12 +14,13 @@
 #include <sys/file.h>
 
 #include "screenshot.h"
+#include "jf_paths.h"
 #include "rsxutil.h"
 #include "timing.h"
 #include "plog.h"
 
-#define REQ_FILE "/dev_hdd0/tmp/jf_shot_req.txt"
-#define SHOT_DIR "/dev_hdd0/tmp/jfshot"
+#define REQ_FILE JELLOP_TMP_DIR "/jf_shot_req.txt"
+#define SHOT_DIR JELLOP_TMP_DIR "/jfshot"
 
 static u32  s_frame = 0;
 static char s_name[48];          // a one-off shot waiting, "" when none

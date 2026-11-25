@@ -51,7 +51,10 @@ jobs:
           ref: ${{ needs.source.outputs.revision }}
       - name: Audit inherited absolute scratch paths
         run: |
-          git grep -n -E '"/dev_hdd0/(tmp/|jellyfin_offline)' -- source || true
+          if git grep -n -E '"/dev_hdd0/(tmp/|jellyfin_offline)' -- source | grep -v 'source/util/jf_paths.h:.*JELLOP_TMP_DIR'; then
+            echo 'Unexpected shared scratch path in native source'
+            exit 1
+          fi
       - name: Native programme and resource regression
         run: |
           g++ -std=c++11 -Wall -Wextra -O2 port/test_programme.cpp source/api/livetv.cpp -o /tmp/test-jellop
