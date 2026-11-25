@@ -1,0 +1,224 @@
+// Settings screen model -- see settings_model.h.
+
+#ifndef ENABLE_PLAYER_STATS
+#include "../build_config.h"
+#endif
+#include "settings_model.h"
+#include "update_page.h"
+#include "i18n.h"
+
+#include <stddef.h>
+
+// The help text is exactly two lines: the first says what the setting does,
+// the second what it means for the listener.
+static const setting_row k_rows[] = {
+    // ---- Playback
+    { SET_HD1080,    SEC_PLAYBACK, TRN("1080p Playback (Alpha)"),
+      TRN("Ask the server for full 1920x1080 video instead of 720p.\n"
+      "Sharper, but needs more bandwidth. Still experimental.")},
+    { SET_24HZ,      SEC_PLAYBACK, TRN("24Hz Output"),
+      TRN("Auto: the TV switches to the best rate for each video.\n"
+      "Films only leaves shows at 60Hz, so it switches less. Off: always 60Hz.")},
+    { SET_SKIP_INTRO, SEC_PLAYBACK, TRN("Skip Intros"),
+      TRN("Intros and recaps. Button: {X} skips when the badge shows.\n"
+      "Auto: they go by themselves. Needs markers on the server.")},
+    { SET_SKIP_CREDITS, SEC_PLAYBACK, TRN("Skip Credits"),
+      TRN("Button: {X} skips when the badge shows. Auto: skips by itself.\n"
+      "With a next episode, skipping goes straight to it.")},
+    { SET_DIRECT_PLAY, SEC_PLAYBACK, TRN("Direct Play"),
+      TRN("At top quality, plays MKV and TS files as they are, with no remux.\n"
+      "Anything else still comes through the server.")},
+    { SET_DIRECT_STREAM, SEC_PLAYBACK, TRN("Direct Stream"),
+      TRN("Auto: the server may pass a compatible video through untouched.\n"
+      "Off: always re-encode. Try Off if playback stutters at every quality.")},
+#if ENABLE_PLAYER_STATS
+    { SET_STATS,     SEC_PLAYBACK, TRN("Playback Statistics"),
+      TRN("Keeps playback statistics over the video: frame rate,\n"
+      "bitrate, buffer and decoder. {R3} shows or hides them for now.")},
+#endif
+    // ---- Live TV
+    { SET_LIVETV_QUALITY, SEC_LIVETV, TRN("Live TV Quality"),
+      TRN("Auto is 720p at 4 Mbps, the best fit for most Wi-Fi.\n"
+      "Drop to 480p if channels stutter; films keep their own quality.")},
+    { SET_LIVETV_BUFFER, SEC_LIVETV, TRN("Live TV Buffer"),
+      TRN("How much of a channel is saved before it plays.\n"
+      "Shorter starts channels sooner; longer rides out Wi-Fi gaps.")},
+    { SET_ONNOW, SEC_LIVETV, TRN("On Now on Home"),
+      TRN("A Home row of what's on Live TV now, from the server's guide.\n"
+      "{X} plays the channel.")},
+    // ---- Audio
+    { SET_AUDIO_OUT, SEC_AUDIO, TRN("Audio Output"),
+      TRN("Stereo, 5.1 or 7.1 over HDMI. Dolby Digital sends the film's Dolby\n"
+      "track untouched: use it if your soundbar drops the centre channel.")},
+    { SET_DIALOGUE,  SEC_AUDIO, TRN("Dialogue Boost"),
+      TRN("Raise the centre channel, where the dialogue is. Not available\n"
+      "with Dolby Digital passthrough. Helps when voices are quiet.")},
+    { SET_MENU_SOUNDS, SEC_AUDIO, TRN("Menu Sounds"),
+      TRN("The PS3's own cursor and select sounds in the menus.\n"
+      "Films and music are not affected.")},
+    // ---- Subtitles
+    { SET_SUB_FONT,  SEC_SUBTITLES, TRN("Subtitle Font"),
+      TRN("The typeface subtitles are drawn in.\n"
+      "Left and Right step through the choices.")},
+    { SET_SUB_COLOUR, SEC_SUBTITLES, TRN("Subtitle Colour"),
+      TRN("The colour subtitles are drawn in.\n"
+      "White is the broadcast default; the others are softer.")},
+    // ---- Downloads
+    { SET_DL_LOCATION, SEC_DOWNLOADS, TRN("Download Location"),
+      TRN("Where new downloads are saved: this HDD, or an NTFS/FAT32 USB drive.\n"
+      "The lists show the downloads on the drive while it is plugged in.")},
+    { SET_DOWNLOADS, SEC_DOWNLOADS, TRN("Downloads"),
+      TRN("Downloads in progress, with pause and cancel.\n"
+      "They wait while you stream and carry on by themselves.")},
+    { SET_OFFLINE_LIB, SEC_DOWNLOADS, TRN("Offline Library"),
+      TRN("Films and episodes saved on this PS3, ready to play.\n"
+      "They play without a connection to your server.")},
+    // ---- Display
+    { SET_LANGUAGE,  SEC_DISPLAY, TRN("Language"),
+      TRN("The language the menus are shown in.\n"
+      "Auto follows the PS3's own language setting.") },
+    { SET_LAYOUT,    SEC_DISPLAY, TRN("Layout"),
+      TRN("XMB browses like the PS3's own menu. Classic lays Home out\n"
+      "like Jellyfin in a web browser: rows of posters under a header.")},
+    { SET_THEME,     SEC_DISPLAY, TRN("Theme"),
+      TRN("The interface colour theme.\n"
+      "Jellywave is the default; extra .ini themes appear here too.")},
+    { SET_HOME_ORDER, SEC_DISPLAY, TRN("Home Order"),
+      TRN("The order of your libraries under My Media in the Classic layout.\n"
+      "{X} to put them in your own order.")},
+    { SET_SCREEN_SIZE, SEC_DISPLAY, TRN("Screen Size"),
+      TRN("Shrink the picture to fit TVs that crop the edges (overscan).\n"
+      "Line the corners up with your screen's edges.")},
+    { SET_DAYNIGHT,  SEC_DISPLAY, TRN("Day / Night Palette"),
+      TRN("Brighten the background by day, back to the night look after\n"
+      "dark, with a glow at dawn and dusk. Follows the console clock.")},
+    { SET_WAVE_INT,  SEC_DISPLAY, TRN("Wave Intensity"),
+      TRN("How strongly the wave reacts to music.\n"
+      "Off keeps it calm; Max makes every beat hit hard.")},
+    { SET_PARTICLES, SEC_DISPLAY, TRN("Menu Particles"),
+      TRN("Let the floating particles drift behind the menus too,\n"
+      "not only while music is playing.")},
+    { SET_SCREENSAVER, SEC_DISPLAY, TRN("Screensaver"),
+      TRN("After a few idle minutes: Classic drifts posters over the wave,\n"
+      "Artwork fills the screen with backdrops. Off never starts it.")},
+    { SET_SAVER_DELAY, SEC_DISPLAY, TRN("Screensaver Delay"),
+      TRN("How long the menus wait, untouched, before the screensaver\n"
+      "starts: 30 seconds to 5 minutes.")},
+    // ---- System
+    { SET_UPDATE,    SEC_SYSTEM, TRN("Software Update"),
+      TRN("Checked at every launch. {X} checks again, and offers to\n"
+      "download and install a new version when there is one.") },
+    { SET_ABOUT,     SEC_SYSTEM, TRN("About"),
+      TRN("The version, who made the app, and the licences of\n"
+      "everything in it.")},
+    { SET_DEBUG_LOG, SEC_SYSTEM, TRN("Debug Logging"),
+      TRN("Write a diagnostic log to /dev_hdd0/tmp/player_log.txt (off by default).\n"
+      "Use Send Log to Server when reporting a problem.")},
+    { SET_SEND_LOG,  SEC_SYSTEM, TRN("Send Log to Server"),
+      TRN("Send the diagnostic log to your Jellyfin server (X). It is saved\n"
+      "under Dashboard > Logs as upload_PS3_...log: share that file.")},
+    // ---- Account & Server
+    { SET_SHARE_LOGIN, SEC_ACCOUNT, TRN("Share Sign-in"),
+      TRN("On: PS3 users with no sign-in of their own use this account.\n"
+      "One account can be shared; users signed in to their own keep it.")},
+    { SET_WOL_MAC,   SEC_ACCOUNT, TRN("Server MAC Address"),
+      TRN("The server PC's MAC address, so this PS3 can wake it ({X} to enter).\n"
+      "On the PC: ipconfig /all, then Physical Address. Jellyfin can't say.")},
+    { SET_WAKE,      SEC_ACCOUNT, TRN("Wake Server"),
+      TRN("Send a Wake-on-LAN signal to the server PC (X). It is also sent when\n"
+      "the server can't be reached. The PC must allow wake-up in its BIOS.")},
+    { SET_LOGOUT,    SEC_ACCOUNT, TRN("Log Out"),
+      TRN("Sign out of this Jellyfin account.\n"
+      "You will need to log in again to browse your library.")},
+};
+
+#define N_ROWS ((int)(sizeof(k_rows) / sizeof(k_rows[0])))
+
+static const char *const k_section_labels[SEC__COUNT] = {
+    TRN("Playback"), TRN("Live TV"), TRN("Audio"), TRN("Subtitles"), TRN("Downloads"), TRN("Display"), TRN("System"), TRN("Account & Server"),
+};
+
+int settings_count(void) { return N_ROWS; }
+
+const setting_row *settings_row(int i) {
+    return (i >= 0 && i < N_ROWS) ? &k_rows[i] : NULL;
+}
+
+int settings_index_of(setting_id id) {
+    for (int i = 0; i < N_ROWS; i++)
+        if (k_rows[i].id == id) return i;
+    return -1;
+}
+
+const char *settings_section_label(setting_section s) {
+    return (s >= 0 && s < SEC__COUNT) ? k_section_labels[s] : "";
+}
+
+int settings_section_first(setting_section s) {
+    for (int i = 0; i < N_ROWS; i++)
+        if (k_rows[i].section == s) return i;
+    return -1;
+}
+
+int settings_category_count(void) {
+    int n = 0;
+    for (int s = 0; s < SEC__COUNT; s++)
+        if (settings_section_first((setting_section)s) >= 0) n++;
+    return n;
+}
+
+setting_section settings_category_at(int i) {
+    int n = 0;
+    for (int s = 0; s < SEC__COUNT; s++)
+        if (settings_section_first((setting_section)s) >= 0) {
+            if (n == i) return (setting_section)s;
+            n++;
+        }
+    return SEC__COUNT;
+}
+
+int settings_category_index(setting_section s) {
+    if (s < 0 || s >= SEC__COUNT || settings_section_first(s) < 0) return -1;
+    int n = 0;
+    for (int t = 0; t < (int)s; t++)
+        if (settings_section_first((setting_section)t) >= 0) n++;
+    return n;
+}
+
+int settings_category_row_count(setting_section s) {
+    int n = 0;
+    for (int i = 0; i < N_ROWS; i++) if (k_rows[i].section == s) n++;
+    return n;
+}
+
+int settings_category_row(setting_section s, int k) {
+    if (k < 0) return -1;
+    int n = 0;
+    for (int i = 0; i < N_ROWS; i++)
+        if (k_rows[i].section == s) {
+            if (n == k) return i;
+            n++;
+        }
+    return -1;
+}
+
+int settings_row_in_category(int row) {
+    if (row < 0 || row >= N_ROWS) return -1;
+    int k = 0;
+    for (int i = 0; i < row; i++) if (k_rows[i].section == k_rows[row].section) k++;
+    return k;
+}
+
+int settings_scroll_to(int n, int sel, int item_h, int gap, int band_h, int cur) {
+    if (n <= 0 || sel < 0 || sel >= n) return cur < 0 ? 0 : cur;
+    const int total = n * item_h + (n - 1) * gap;
+    if (total <= band_h) return 0;
+    const int top = sel * (item_h + gap), bot = top + item_h;
+    int s = cur;
+    if (top < s)          s = top;
+    if (bot - band_h > s) s = bot - band_h;
+    const int max_s = total - band_h;
+    if (s > max_s) s = max_s;
+    if (s < 0) s = 0;
+    return s;
+}

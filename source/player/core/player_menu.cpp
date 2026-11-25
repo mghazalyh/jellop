@@ -1,0 +1,409 @@
+// AUDIO / CC track selection — opens the HUD popup menus and applies the
+// chosen track.  Picking a different track reopens the stream at the current
+// position with the new AudioStreamIndex/SubtitleStreamIndex.  The reopen IS
+// the seek path with delta 0 — same stop-transcode + fresh-PlaySessionId
+// dance, just different URL params.
+
+#include <stdio.h>
+#include <string.h>
+
+#include "player_internal.h"
+#include "plog.h"
+#include "subtitles.h"
+#include "slog.h"
+#include "experience.h"
+#include "ui_visuals.h"      // vpick_audio_words
+#include "chapters.h"
+#include "player_picture.h"   // picture_cycle_aspect
+#include "timing.h"
+#include "audio.h"           // audio_get_clock_us
+#include "autoskip.h"        // Skip Intros / Skip Credits
+#include "statsovl.h"        // Playback Statistics
+#include "../../build_config.h"   // ENABLE_PLAYER_STATS (relative: source/ is not on the -I path)
+
+// ---- Remembered track preference (see player_internal.h) ------------------
+static char s_pref_audio_label[64] = "";
+static char s_pref_sub_label[64]   = "";
+static bool s_pref_sub_have        = false;   // user has chosen a sub state
+static bool s_pref_sub_off         = false;   // and that choice was "Off"
+
+void track_pref_note_audio(const JFStream *s) {
+    if (!s) return;
+    snprintf(s_pref_audio_label, sizeof(s_pref_audio_label), "%s", s->label);
+}
+
+void track_pref_note_sub(const JFStream *s) {
+    s_pref_sub_have = true;
+    s_pref_sub_off  = (s == NULL);
+    if (s) snprintf(s_pref_sub_label, sizeof(s_pref_sub_label), "%s", s->label);
+    else   s_pref_sub_label[0] = '\0';
+}
+
+int track_pref_find_audio(const JFTracks *tracks) {
+    if (!s_pref_audio_label[0]) return -1;
+    for (int i = 0; i < tracks->n_audio; i++)
+        if (strcmp(tracks->audio[i].label, s_pref_audio_label) == 0)
+            return i;
+    return -1;
+}
+
+int track_pref_find_sub(const JFTracks *tracks) {
+    if (!s_pref_sub_have || s_pref_sub_off || !s_pref_sub_label[0]) return -1;
+    for (int i = 0; i < tracks->n_subs; i++)
+        if (strcmp(tracks->subs[i].label, s_pref_sub_label) == 0 &&
+            jf_sub_is_text(tracks->subs[i].codec))
+            return i;
+    return -1;
+}
+
+// ---- Chapters (R1) ----------------------------------------------------------
+// The list is fetched the first time it is asked for, on a worker (chapters.h),
+// so a slow server shows "Loading chapters..." and the film plays on.
+static bool        s_chap_pending = false;
+static char        s_chap_lab[JF_MAX_CHAPTERS][64];
+static const char *s_chap_items[JF_MAX_CHAPTERS];
+
+static double chapters_pos_secs(const PlayerState *ps) {
+    return (double)(ps->play_base_us + audio_get_clock_us()) / 1e6;
+}
+
+static void chapters_banner(const char *line) {
+    hud_set_banner(line, "", timing_get_us() + 2500000ULL);
+}
+
+static void chapters_open(PlayerState *ps) {
+    const JFChapters *c = jf_chapters();
+    for (int i = 0; i < c->n; i++) {
+        jf_chapter_label(&c->ch[i], i, TR("Chapter %d"), s_chap_lab[i], sizeof s_chap_lab[i]);
+        s_chap_items[i] = s_chap_lab[i];
+    }
+    ps->menu_kind = PLAYER_MENU_CHAPTERS;
+    hud_open_menu(TR("Chapters"), s_chap_items, c->n,
+                  jf_chapter_index_at(c, chapters_pos_secs(ps)));
+}
+
+// ---- Audio / Subtitles track menu ---------------------------------------------
+// One menu with two lists: Triangle (and Left / Right) in it flips between them,
+// and the hint bar names the other one.  Only offered when that list has entries.
+static bool has_audio_menu(const PlayerState *ps) { return ps->have_tracks && ps->tracks.n_audio > 0; }
+static bool has_subs_menu(const PlayerState *ps)  { return ps->have_tracks && ps->tracks.n_subs  > 0; }
+
+static void open_audio_menu(PlayerState *ps) {
+    const char *items[JF_MAX_AUDIO];
+    for (int i = 0; i < ps->tracks.n_audio; i++)
+        items[i] = ps->tracks.audio[i].label;
+    ps->menu_kind = PLAYER_MENU_AUDIO;
+    hud_open_menu(TR("Audio"), items, ps->tracks.n_audio, ps->cur_audio);
+    if (has_subs_menu(ps)) hud_set_menu_switch(TRN("Subtitles"));
+}
+
+static void open_subs_menu(PlayerState *ps) {
+    const char *items[JF_MAX_STREAMS + 1];
+    items[0] = TR("Off");
+    for (int i = 0; i < ps->tracks.n_subs; i++)
+        items[1 + i] = ps->tracks.subs[i].label;
+    ps->menu_kind = PLAYER_MENU_SUBS;
+    hud_open_menu(TR("Subtitles"), items, ps->tracks.n_subs + 1, ps->cur_sub + 1);
+    if (has_audio_menu(ps)) hud_set_menu_switch(TRN("Audio"));
+}
+
+// ---- Options (START) --------------------------------------------------------
+// One menu over the player, as on the console's own player: each row with what
+// it is set to now.  A row that opens something (Chapters, Audio / Subtitles,
+// Picture) hands over to it; a setting (Statistics, the skips) changes in place
+// and the menu stays open on it; Next / Previous end this playback.
+enum { OPT_CHAPTERS, OPT_TRACKS, OPT_PICTURE, OPT_STATS, OPT_NEXT, OPT_PREV,
+       OPT_SKIP_INTRO, OPT_SKIP_CREDITS, OPT_MAX };
+static int         s_opt_kind[OPT_MAX];
+static const char *s_opt_items[OPT_MAX];
+static const char *s_opt_vals[OPT_MAX];
+static char        s_opt_valbuf[OPT_MAX][96];
+static int         s_opt_n;
+
+static bool is_episode(const PlayerState *ps) {
+    return ps->item && strcmp(ps->item->type, "Episode") == 0;
+}
+
+static void opt_chapters_value(const PlayerState *ps, char *out, int cap) {
+    const int st = jf_chapters_state();
+    if (st == JF_CHAPTERS_READY) {
+        const JFChapters *c = jf_chapters();
+        const int i = jf_chapter_index_at(c, chapters_pos_secs(ps));
+        if (i < 0)               snprintf(out, cap, "%s", "");
+        else if (c->ch[i].name[0]) snprintf(out, cap, "%s", c->ch[i].name);
+        else                     snprintf(out, cap, TR("Chapter %d"), i + 1);
+    } else if (st == JF_CHAPTERS_NONE) {
+        snprintf(out, cap, "%s", TR("No chapters"));
+    } else {
+        snprintf(out, cap, "%s", TR("Loading chapters..."));
+    }
+}
+
+static void opt_tracks_value(const PlayerState *ps, char *out, int cap) {
+    char a[64] = "";
+    if (ps->cur_audio >= 0 && ps->cur_audio < ps->tracks.n_audio)
+        vpick_audio_words(ps->tracks.audio[ps->cur_audio].label, a, sizeof a);
+    const char *s = (ps->cur_sub >= 0 && ps->cur_sub < ps->tracks.n_subs)
+                  ? ps->tracks.subs[ps->cur_sub].label : TR("Off");
+    snprintf(out, cap, "%s / %s", a[0] ? a : TR("Default"), s);
+}
+
+void player_open_options(PlayerState *ps, int row) {
+    int n = 0;
+    const bool chapters = player_has_chapters(ps);
+    const bool tracks   = !ps->live && (has_audio_menu(ps) || has_subs_menu(ps));
+    const bool ep       = is_episode(ps);
+    if (chapters) {
+        s_opt_kind[n] = OPT_CHAPTERS; s_opt_items[n] = TR("Chapters");
+        opt_chapters_value(ps, s_opt_valbuf[n], sizeof s_opt_valbuf[n]); n++;
+    }
+    if (tracks) {
+        s_opt_kind[n] = OPT_TRACKS; s_opt_items[n] = TR("Audio / Subtitles");
+        opt_tracks_value(ps, s_opt_valbuf[n], sizeof s_opt_valbuf[n]); n++;
+    }
+    {
+        const int a = picture_get().aspect;
+        s_opt_kind[n] = OPT_PICTURE; s_opt_items[n] = TR("Picture");
+        snprintf(s_opt_valbuf[n], sizeof s_opt_valbuf[n], "%s",
+                 a == PIC_FILL ? TR("Fill") : a == PIC_STRETCH ? TR("Stretch") : TR("Fit"));
+        n++;
+    }
+#if ENABLE_PLAYER_STATS
+    s_opt_kind[n] = OPT_STATS; s_opt_items[n] = TR("Playback Statistics");
+    snprintf(s_opt_valbuf[n], sizeof s_opt_valbuf[n], "%s", statsovl_shown() ? TR("On") : TR("Off"));
+    n++;
+#endif
+    if (!ps->live && ps->has_next) {
+        s_opt_kind[n] = OPT_NEXT; s_opt_items[n] = ep ? TR("Next Episode") : TR("Next");
+        snprintf(s_opt_valbuf[n], sizeof s_opt_valbuf[n], "%s", ps->next_name); n++;
+    }
+    if (!ps->live && ps->has_prev) {
+        s_opt_kind[n] = OPT_PREV; s_opt_items[n] = ep ? TR("Previous Episode") : TR("Previous");
+        snprintf(s_opt_valbuf[n], sizeof s_opt_valbuf[n], "%s", ps->prev_name); n++;
+    }
+    if (!ps->live && ep) {
+        s_opt_kind[n] = OPT_SKIP_INTRO; s_opt_items[n] = TR("Skip Intros");
+        snprintf(s_opt_valbuf[n], sizeof s_opt_valbuf[n], "%s", tr(skip_mode_label(skip_intro_mode()))); n++;
+        s_opt_kind[n] = OPT_SKIP_CREDITS; s_opt_items[n] = TR("Skip Credits");
+        snprintf(s_opt_valbuf[n], sizeof s_opt_valbuf[n], "%s", tr(skip_mode_label(skip_credits_mode()))); n++;
+    }
+    for (int i = 0; i < n; i++) s_opt_vals[i] = s_opt_valbuf[i];
+    s_opt_n = n;
+    ps->menu_kind = PLAYER_MENU_OPTIONS;
+    hud_open_menu(TR("Options"), s_opt_items, n, -1);
+    hud_set_menu_values(s_opt_vals);
+    hud_set_menu_cursor(row);
+}
+
+// X on an Options row.  Returns the action still to perform.
+static HudAction options_select(PlayerState *ps, int sel) {
+    ps->menu_kind = PLAYER_MENU_NONE;
+    if (sel < 0 || sel >= s_opt_n) return HUD_ACTION_NONE;
+    switch (s_opt_kind[sel]) {
+    case OPT_CHAPTERS:  return player_handle_menu_action(ps, HUD_ACTION_CHAPTERS);
+    case OPT_TRACKS:    return player_handle_menu_action(ps, HUD_ACTION_AUDIO_TRACK);
+    case OPT_PICTURE:   picture_mode_open(); return HUD_ACTION_NONE;
+    case OPT_NEXT:      return HUD_ACTION_NEXT_ITEM;
+    case OPT_PREV:      return HUD_ACTION_PREV_ITEM;
+#if ENABLE_PLAYER_STATS
+    case OPT_STATS:     statsovl_toggle_shown(); break;          // this playback, as R3 does
+#endif
+    case OPT_SKIP_INTRO:   skip_intro_step(+1);   break;
+    case OPT_SKIP_CREDITS: skip_credits_step(+1); break;
+    default: return HUD_ACTION_NONE;
+    }
+    player_open_options(ps, sel);          // a setting: stay, on the same row
+    return HUD_ACTION_NONE;
+}
+
+HudAction player_handle_menu_action(PlayerState *ps, HudAction act) {
+    if (act == HUD_ACTION_MENU_SWITCH) {
+        act = HUD_ACTION_NONE;
+        if (ps->menu_kind == PLAYER_MENU_AUDIO && has_subs_menu(ps))       open_subs_menu(ps);
+        else if (ps->menu_kind == PLAYER_MENU_SUBS && has_audio_menu(ps))  open_audio_menu(ps);
+        return act;
+    }
+    if (s_chap_pending) {
+        const int st = jf_chapters_state();
+        if (st == JF_CHAPTERS_READY)     { s_chap_pending = false; chapters_open(ps); }
+        else if (st == JF_CHAPTERS_NONE) { s_chap_pending = false; chapters_banner(TR("No chapters")); }
+        else if (st == JF_CHAPTERS_IDLE) { s_chap_pending = false; }     // another film started
+    }
+    if (act == HUD_ACTION_ASPECT) {
+        picture_mode_open();
+        return HUD_ACTION_NONE;
+    }
+    if (act == HUD_ACTION_CHAPTERS) {
+        act = HUD_ACTION_NONE;
+        const int st = jf_chapters_state();
+        if (!player_has_chapters(ps)) {
+            chapters_banner(TR("No chapters"));          // a file on a drive: not read from the file yet
+        } else if (st == JF_CHAPTERS_READY) {
+            chapters_open(ps);
+        } else if (st == JF_CHAPTERS_NONE) {
+            chapters_banner(TR("No chapters"));
+        } else {
+            if (st == JF_CHAPTERS_IDLE) jf_chapters_request(ps->item->id);
+            s_chap_pending = true;
+            chapters_banner(TR("Loading chapters..."));
+        }
+        return act;
+    }
+    if (act == HUD_ACTION_AUDIO_TRACK) {
+        act = HUD_ACTION_NONE;
+        if (has_audio_menu(ps)) {
+            open_audio_menu(ps);
+        } else if (has_subs_menu(ps)) {
+            open_subs_menu(ps);              // no audio list to show: Triangle still reaches the subtitles
+        } else {
+            plog("hud: audio - no tracks");
+        }
+    } else if (act == HUD_ACTION_SUBTITLE) {
+        act = HUD_ACTION_NONE;
+        if (has_subs_menu(ps)) {
+            open_subs_menu(ps);
+        } else {
+            plog("hud: subs - none available");
+            chapters_banner(TR("No subtitles"));   // say so, rather than the press doing nothing
+        }
+    } else if (act == HUD_ACTION_MENU_SELECT) {
+        act = HUD_ACTION_NONE;
+        int sel = hud_menu_choice();
+        if (ps->menu_kind == PLAYER_MENU_OPTIONS) return options_select(ps, sel);
+        if (ps->menu_kind == PLAYER_MENU_CHAPTERS) {
+            const JFChapters *c = jf_chapters();
+            if (jf_chapters_state() == JF_CHAPTERS_READY && sel >= 0 && sel < c->n) {
+                const double to = c->ch[sel].start_secs, from = chapters_pos_secs(ps);
+                const int delta = (int)(to >= from ? to - from + 0.5 : to - from - 0.5);
+                char b[80];
+                snprintf(b, sizeof b, "hud: chapter %d -> %.0f s (%+d)", sel + 1, to, delta);
+                plog(b);
+                if (delta != 0) player_seek_queue_tap(ps, delta);
+            }
+            ps->menu_kind = PLAYER_MENU_NONE;
+            return HUD_ACTION_NONE;
+        }
+        if (ps->menu_kind == PLAYER_MENU_AUDIO &&
+            sel >= 0 && sel < ps->tracks.n_audio && sel != ps->cur_audio) {
+            ps->cur_audio = sel;
+            track_pref_note_audio(&ps->tracks.audio[ps->cur_audio]);
+            {
+                // The audio chip names the track, in the selector's words.
+                char w[64];
+                vpick_audio_words(ps->tracks.audio[ps->cur_audio].label, w, sizeof w);
+                hud_set_audio_label(w[0] ? w : TR("Default"));
+            }
+            act = HUD_ACTION_SEEK;     // 0-delta reopen applies the track
+            char buf[96];
+            snprintf(buf, sizeof(buf), "hud: audio -> [%d] %s",
+                     ps->tracks.audio[ps->cur_audio].index,
+                     ps->tracks.audio[ps->cur_audio].label);
+            plog(buf);
+            slog_state("AUDIO_TRACK sel=%d idx=%d label=%.30s",
+                       ps->cur_audio, ps->tracks.audio[ps->cur_audio].index,
+                       ps->tracks.audio[ps->cur_audio].label);
+        } else if (ps->menu_kind == PLAYER_MENU_SUBS &&
+                   sel >= 0 && sel <= ps->tracks.n_subs &&
+                   sel - 1 != ps->cur_sub) {
+            ps->cur_sub = sel - 1;     // entry 0 = "Off" -> -1
+            hud_set_cc_active(ps->cur_sub >= 0);
+
+            // A file on a drive: the cues come out of the file as it is read, so a track change is the 0-delta
+            // reopen (player_local_open starts collecting the new track); Off needs none, the cues just stop being kept.
+            if (ps->local) {
+                ps->sub_is_text = ps->sub_is_pgs = false;
+                if (ps->cur_sub >= 0 && local_is_sidecar(ps->tracks.subs[ps->cur_sub].index)) {
+                    // A file beside the video: read whole, no reopen needed for it.  A Matroska file reading an
+                    // embedded track is reopened without it, or its cues would join the file's.
+                    ps->sub_is_text = player_local_load_sidecar(ps, ps->cur_sub);
+                    if (!ps->sub_is_text) { ps->cur_sub = -1; hud_set_cc_active(false); chapters_banner(TR("No subtitles")); }
+                    if (ps->local->container == LM_MKV) act = HUD_ACTION_SEEK;
+                    ps->menu_kind = PLAYER_MENU_NONE;
+                    return act;
+                }
+                if (ps->cur_sub >= 0) {
+                    const JFStream *st = &ps->tracks.subs[ps->cur_sub];
+                    ps->sub_is_text = jf_sub_is_text(st->codec);
+                    ps->sub_is_pgs  = jf_sub_is_pgs(st->codec);
+                    act = HUD_ACTION_SEEK;
+                    char b[96];
+                    snprintf(b, sizeof(b), "hud: subs (local) -> [%d] %.40s", st->index, st->label);
+                    plog(b);
+                } else {
+                    subs_clear();
+                    plog("hud: subs (local) -> off");
+                }
+                ps->menu_kind = PLAYER_MENU_NONE;
+                return act;
+            }
+
+            // A TEXT or PGS track is fetched and drawn here, so it needs no
+            // reopen at all -- the video stream is untouched and carries on.
+            // Only a track this app cannot decode itself (VOBSUB, or a
+            // fetch failure) changes the URL to ask for burn-in, and only
+            // that case is worth interrupting playback for.
+            ps->sub_is_text = false;
+            ps->sub_is_pgs  = false;
+            if (ps->cur_sub >= 0) {
+                const JFStream *st = &ps->tracks.subs[ps->cur_sub];
+                ps->sub_is_text = jf_sub_is_text(st->codec);
+                if (ps->sub_is_text) {
+                    const char *msid = ps->source.id;
+                    if (subs_load(ps->item->id, msid, st->index) > 0) {
+                        ps->menu_kind = PLAYER_MENU_NONE;
+                        track_pref_note_sub(st);
+                        char b[112];
+                        snprintf(b, sizeof(b),
+                                 "subs: drawing [%d] %.40s on-device, no reopen",
+                                 st->index, st->label);
+                        plog(b);
+                        return act;            // nothing to re-negotiate
+                    }
+                    // Could not fetch it: fall through to the burn-in path
+                    // rather than silently showing nothing.
+                    plog("subs: on-device load failed, asking the server to burn in");
+                    ps->sub_is_text = false;
+                } else if (jf_sub_is_pgs(st->codec)) {
+                    const char *msid = ps->source.id;
+                    if (subs_load_pgs(ps->item->id, msid, st->index) > 0) {
+                        ps->sub_is_pgs = true;
+                        ps->menu_kind  = PLAYER_MENU_NONE;
+                        // Not remembered via track_pref_note_sub(): that
+                        // preference match requires jf_sub_is_text() (see
+                        // player_internal.h), so a PGS pick is deliberately
+                        // never auto-applied to the next title -- it would
+                        // have to fetch a whole .sup speculatively to find
+                        // out whether the match was even right.
+                        char b[112];
+                        snprintf(b, sizeof(b),
+                                 "subs: drawing pgs [%d] %.40s on-device, no reopen",
+                                 st->index, st->label);
+                        plog(b);
+                        return act;
+                    }
+                    plog("subs: pgs load failed, asking the server to burn in");
+                }
+            } else {
+                subs_clear();
+                track_pref_note_sub(NULL);
+            }
+            act = HUD_ACTION_SEEK;     // 0-delta reopen applies the sub
+            char buf[96];
+            if (ps->cur_sub >= 0)
+                snprintf(buf, sizeof(buf), "hud: subs -> [%d] %s",
+                         ps->tracks.subs[ps->cur_sub].index,
+                         ps->tracks.subs[ps->cur_sub].label);
+            else
+                snprintf(buf, sizeof(buf), "hud: subs -> off");
+            plog(buf);
+            if (ps->cur_sub >= 0)
+                slog_state("SUB_TRACK sel=%d idx=%d label=%.30s", ps->cur_sub,
+                           ps->tracks.subs[ps->cur_sub].index,
+                           ps->tracks.subs[ps->cur_sub].label);
+            else
+                slog_state("SUB_TRACK sel=-1 off=1");
+        }
+        ps->menu_kind = PLAYER_MENU_NONE;
+    }
+    return act;
+}

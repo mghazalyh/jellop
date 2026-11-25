@@ -1,0 +1,135 @@
+build/
+*.elf
+*.self
+*.fake.self
+*.map
+*.o
+*.d
+*.pkg
+*.gnpdrm.pkg
+
+# ...but the PUBLISHED build is not a build artifact, it is the download the
+# README points at.  Without this negation `git add release` silently took the
+# README and skipped the .pkg -- no error, and every download link on GitHub
+# pointed at a file that was never pushed.
+!release/*.pkg
+*.self
+*.elf
+*.map
+obj/
+tools/ui_preview/preview
+tools/ui_preview/preview_offline
+# offline-screen frames: the PNGs are committed, the raw PPMs are not
+tools/ui_preview/[89]_*.ppm
+tools/ui_preview/1[0-9]_*.ppm
+
+# Host-side test artifacts (tests/Makefile.host)
+tests/test_ac3_map
+tests/test_ac3_decode
+tests/test_media_sources
+tests/test_offline
+tests/track_codec_host.o
+tests/test_dts_hd
+tests/test_dts_xll_dump
+tests/tones51.ac3
+tests/decoded.f32
+tests/test_dts_map
+tests/test_dts_decode
+tests/test_dts_stream
+tests/test_dts_exss
+tests/test_track_codec
+tests/tones51.dts
+tests/test_truehd_map
+tests/test_truehd_decode
+tests/tones51.thd
+tests/tones51.thd.ref
+
+# Compiled host test binaries (tests/Makefile.host builds these)
+tests/test_*
+!tests/test_*.c
+!tests/test_*.cpp
+!tests/test_*.h
+
+# Console logs pulled over FTP and local build logs
+player_log*.txt
+*.log
+*.pre-*
+tests/tones51.spdif
+tests/test_iec61937
+tests/test_stream_request
+tests/test_settings_model
+tests/test_settings_model_nostats
+tests/test_userdata
+tests/test_livetv
+tests/test_live_watch
+tests/test_mohasi_fs
+tests/test_mohasi_fs_be
+tests/test_lfs_path
+tests/test_h264_sps
+tests/test_mkv_demux
+tests/test_mkv_ts
+tests/test_local_probe
+tests/test_lfs_path
+tests/test_h264_sps
+tests/test_mkv_demux
+tests/test_mkv_ts
+tests/test_local_probe
+tests/test_local_play
+tests/test_local_names
+tests/test_local_resume
+tests/test_resample
+tests/test_aac
+tests/test_flac
+tests/test_lossless
+tests/test_sub_conv
+tests/test_local_subs
+tests/test_local_tags
+tests/test_local_audio
+tests/test_local_music
+tests/test_music_engine
+tests/em_le
+tests/em_be
+tests/cmp_floats
+tests/em_le.txt
+tests/em_be.txt
+tests/em_le.bin
+tests/em_be.bin
+tests/text_shadow_*.ppm
+
+# Custom build: host test binaries and the SDK archive for tools/Dockerfile.ps3
+tests/test_auth_data
+tests/test_login_osk
+tests/test_login_drawn
+tests/test_release_version
+tools/*.tar.gz
+tests/test_search_model
+tests/local/
+tests/test_sha256
+tests/test_release_asset
+
+tests/test_classic_library
+
+# Personal editor / assistant settings
+.claude/
+.vscode/
+
+# Rebuilt by every build
+data/jf_spu_kernel.bin
+
+# Preview renderer intermediates (the PNGs are kept)
+tools/ui_preview/*.ppm
+tests/mp4_*.mp4
+tests/mp4_*.mov
+tests/test_mp4_demux
+tests/test_rtl_text
+tests/test_local_sidecar
+
+# The PS4 version lives in its own repository: nothing of it is committed here
+*PS4*/
+*-PS4*.pkg
+IV0000-*.pkg
+JFPS40000*
+tests/tones51.eac3
+tests/tones51.eac3.ref
+tests/tones51.ac3.ref
+tests/test_eac3_decode
