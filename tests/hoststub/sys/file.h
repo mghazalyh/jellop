@@ -10,6 +10,10 @@
 #include <ppu-types.h>
 #include <dirent.h>
 #include <string.h>
+#include <stdio.h>
+
+// Host tests never create the console\'s absolute /dev_hdd0 tree.
+static inline s32 sysLv2FsMkdir(const char *, int) { return 0; }
 
 #ifndef MAXPATHLEN
 #define MAXPATHLEN 1024
