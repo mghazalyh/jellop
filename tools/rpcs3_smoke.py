@@ -60,7 +60,8 @@ def main():
                 try:proc.wait(timeout=10)
                 except subprocess.TimeoutExpired:
                     os.killpg(proc.pid,signal.SIGKILL);proc.wait()
-            for src in (state,tmp/"crash_log.txt",tmp/"player_log.txt",root/"RPCS3.log"):
+            cache=Path(os.environ.get("XDG_CACHE_HOME",str(root)))/"rpcs3"
+            for src in (state,tmp/"crash_log.txt",tmp/"player_log.txt",cache/"RPCS3.log"):
                 if src.is_file():
                     with src.open("rb") as f:
                         f.seek(max(0,src.stat().st_size-2*1024*1024))

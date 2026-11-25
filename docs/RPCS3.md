@@ -29,3 +29,5 @@ physical hardware compatibility.
 ## Isolated CI smoke
 
 The [separate workflow](../.github/workflows/rpcs3.yml) downloads a pinned RPCS3 binary and Sony firmware onto an ephemeral runner. Firmware is not included in artifacts. Synthetic HLS uses two channels and 15-second Surf dwell. A pass requires a two-channel catalogue, actual native frame progress for both channels, an automatic transition, and increasing frame counters after the transition. The GUI run uses Mesa software OpenGL under Xvfb; it is not a physical performance benchmark. The workflow runs on pushes and manual dispatch only.
+
+Firmware download provenance: Sony's official 4.93 support link uses HTTP; the CI verifies the exact 206,197,916-byte firmware against the SHA-256 in https://github.com/ScoopInstaller/Games/blob/master/bucket/ps3-system-software.json before installation. No TLS verification bypass is used. The Linux RPCS3 log is collected from XDG_CACHE_HOME/rpcs3, not the config directory.

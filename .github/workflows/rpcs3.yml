@@ -62,8 +62,11 @@ jobs:
           echo 'efba6a20ab8d33edec07c68f46e1f22c43ba95e2bf301c4489bcd6f4c4359bf1  rpcs3.AppImage' | sha256sum -c -
           chmod +x rpcs3.AppImage
           ./rpcs3.AppImage --appimage-extract > /dev/null
-          curl --fail --location --retry 2 --max-time 180 -o PS3UPDAT.PUP https://dus01.ps3.update.playstation.net/update/ps3/image/us/2026_0318_a2b60b6ac1d2e49e230144345616927c/PS3UPDAT.PUP
-          sha256sum PS3UPDAT.PUP
+          # Sony's support link uses HTTP on this legacy CDN. Verify the
+          # exact pinned OFW 4.93 SHA-256 before any installation.
+          curl --fail --location --retry 2 --max-time 180 --proto '=http,https' --proto-redir '=http,https' -o PS3UPDAT.PUP http://dus01.ps3.update.playstation.net/update/ps3/image/us/2026_0318_a2b60b6ac1d2e49e230144345616927c/PS3UPDAT.PUP
+          echo '158471fd834f8ea8036136b6aab43cd86c7ba73d79ca30e0af3c0fe0001cf365  PS3UPDAT.PUP' | sha256sum -c -
+          test "$(stat -c %s PS3UPDAT.PUP)" = 206197916
       - name: Install firmware and candidate in isolated RPCS3 profile
         run: |
           mkdir -p "$XDG_CONFIG_HOME/rpcs3" "$XDG_CACHE_HOME" "$XDG_DATA_HOME" smoke
