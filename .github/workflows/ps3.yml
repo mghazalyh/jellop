@@ -55,6 +55,8 @@ jobs:
           /tmp/test-jellop
           g++ -std=c++11 -Wall -Wextra -Werror -O2 port/test_surf.cpp -o /tmp/test-surf
           /tmp/test-surf
+          g++ -std=c++11 -Wall -Wextra -Werror -O2 port/test_surf_state.cpp -o /tmp/test-surf-state
+          /tmp/test-surf-state
       - name: Upstream Live TV and stream regressions
         working-directory: tests
         run: |

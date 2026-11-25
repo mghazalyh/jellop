@@ -49,6 +49,9 @@
 #include "jellyfin_api.h"
 #include "thumbnail_cache.h"
 #include "player.h"
+#include "surf_state.h"
+#include "user_prefs.h"
+#include "livetv_list.h"
 #include "plog.h"
 #include "timing.h"
 
@@ -858,6 +861,16 @@ void customise(void) {
     }
 }
 
+bool s_surf_requested=false;
+
+uint64_t surf_scope_key() {
+    char page[24];snprintf(page,sizeof page,"%d",cur_key());
+    uint64_t h=surf_hash(g_server);h=surf_hash(g_userid,h);
+    h=surf_hash(s_search_on?"search":"page",h);
+    h=surf_hash(s_search_on?s_term:page,h);
+    return h?h:1;
+}
+
 void play_channel(int idx) {
     if (idx < 0 || idx >= s_n) return;
     JFItem jf;
@@ -865,13 +878,14 @@ void play_channel(int idx) {
     snprintf(jf.id,   sizeof jf.id,   "%s", s_ch[idx].id);
     snprintf(jf.name, sizeof jf.name, "%s", s_ch[idx].name);
     snprintf(jf.type, sizeof jf.type, "TvChannel");
-    note_recent(jf.id);
     show_player(&jf, 0, NULL);
+    s_surf_requested=false;
+    user_prefs_save_async();
     s_last_refresh_us = 0;                  // what is on has moved on
     init_btns();
     // Channel up/down inside the player: the list follows to where it ended.
-    if (player_live_last_channel() && strcmp(player_live_last_channel(), jf.id) != 0)
-        note_recent(player_live_last_channel());
+    // Only the player records a channel after a decoded frame advances.
+    if (s_index_ok && s_npages>0) build_pages(s_pages[s_page].key);
     const int at = xmb_livetv_index_of(player_live_last_channel());
     if (at >= 0) { s_sel = at; s_pg_rows = 0; keep_visible(); }
 }
@@ -1070,6 +1084,30 @@ void xmb_livetv_stop(void) {
     if (s_have_tid) { u64 r; sysThreadJoin(s_tid, &r); s_have_tid = false; }
 }
 
+uint64_t xmb_livetv_surf_scope(void) { return surf_scope_key(); }
+bool xmb_livetv_surf_requested(void) { return s_surf_requested; }
+bool xmb_livetv_surf_load(SurfStore *store) {
+    memset(store,0,sizeof *store);
+    FILE *f=fopen(jf_data_path("jellop_surf.txt"),"rb");
+    if(!f)return false;
+    char buf[SURF_FILE_MAX];
+    size_t n=fread(buf,1,sizeof buf,f);
+    bool ok=!ferror(f)&&n<sizeof buf;fclose(f);
+    if(!ok||memchr(buf,0,n))return false;
+    buf[n]=0;return surf_store_parse(store,buf);
+}
+bool xmb_livetv_surf_save(const SurfStore *store) {
+    char path[192],tmp[208],buf[SURF_FILE_MAX];
+    snprintf(path,sizeof path,"%s",jf_data_path("jellop_surf.txt"));
+    snprintf(tmp,sizeof tmp,"%s.tmp",path);
+    int n=surf_store_format(store,buf,sizeof buf);if(n<0)return false;
+    FILE *f=fopen(tmp,"wb");if(!f)return false;
+    bool ok=fwrite(buf,1,n,f)==(size_t)n&&fflush(f)==0;
+    if(fclose(f)!=0)ok=false;
+    if(ok&&rename(tmp,path)==0)return true;
+    remove(tmp);plog("surf: checkpoint write failed");return false;
+}
+
 void xmb_livetv_record_played(const char *id) {
     if (!id || !id[0]) return;
     prefs_load();
@@ -1122,6 +1160,17 @@ bool xmb_input_livetv(void) {
             if (BTN_REPEAT(down) && s_sel < s_n - 1) s_sel++;
         }
         if (s_sel != was) { keep_visible(); ui_sfx_play(SFX_CURSOR); }
+        if (BTN_PRESSED(l3)) {
+            SurfStore store;
+            int at=s_sel;
+            if(xmb_livetv_surf_load(&store)) for(unsigned i=0;i<SURF_SLOTS;i++)
+                if(store.slots[i].scope==surf_scope_key()){
+                    int saved=xmb_livetv_index_of(store.slots[i].channel);
+                    if(saved>=0)at=saved;
+                    break;
+                }
+            s_surf_requested=true;play_channel(at);return false;
+        }
         if (BTN_PRESSED(cross)) { play_channel(s_sel); return false; }
         if (BTN_PRESSED(triangle)) {
             // Optimistic: star it now, put it back if the server refuses, and

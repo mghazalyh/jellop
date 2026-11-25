@@ -65,6 +65,7 @@
 #include "live_buffer.h"
 #include "live_watch.h"   // Live TV: when to ask for a fresh stream
 #include "surf_clock.h"
+#include "surf_state.h"
 #include "http.h"         // a channel PlaybackInfo may take longer than 24 s
 
 extern void crash_log(const char *msg);
@@ -892,6 +893,7 @@ void show_player_run(const JFItem *item, u32 resume_secs,
     static JFItem s_live_item;
     const bool live = !local && strcmp(item->type, "TvChannel") == 0;
     if (live) {
+        s_live_dead_n=0; // local failed-open exclusions belong to this playback only
         s_live_item = *item;
         item = &s_live_item;
         snprintf(s_live_last_id, sizeof s_live_last_id, "%s", item->id);
@@ -1345,13 +1347,15 @@ void show_player_run(const JFItem *item, u32 resume_secs,
         // Three quarters, not half: the jitter buffer handed ~18 MB back
         // and this is where it does the most good.  Bounded by
         // RING_BYTES_MAX and halved down on allocation failure.
-        if (meminfo_get(&total, &avail)) want = (avail / 4u) * 3u;
+        const bool known=meminfo_get(&total,&avail);
+        if (known) want = (avail / 4u) * 3u;
         // A live reserve is seconds, not minutes: 10 MB holds the longest
         // one at the highest live rate.  With full-size live slots the
         // three-quarter rule took 15 MB and left 4.6 MB, and a channel
         // change froze reopening the decoder in that (2026-10-21).
-        if (live && want > LIVE_RING_BYTES_MAX) want = LIVE_RING_BYTES_MAX;
-        decode_ring_alloc(want);
+        if(live)want=live_ring_budget(avail,known);
+        if(want)decode_ring_alloc(want);
+        char ringlog[100];snprintf(ringlog,sizeof ringlog,"ring: live=%d available=%u request=%u packets=%d",(int)live,avail,want,decode_ring_cap());plog(ringlog);
     }
 
     // Video GPU blit init — allocate RSX buffers once per session.  The
@@ -1597,6 +1601,50 @@ void show_player_run(const JFItem *item, u32 resume_secs,
     surf_clock_init(&surf_clock, 60);
     char surf_recorded[40] = "";
     int surf_last_frame = ps.frame_count;
+    SurfPool surf_pool={};
+    SurfStore surf_store={};
+    SurfCheckpoint surf_checkpoint={};
+    bool surf_pool_valid=false,surf_confirmed=false;
+    u64 surf_saved_us=0;
+    if(live){
+        const int count=xmb_livetv_count();
+        if(count>0&&count<=SURF_POOL_MAX){
+            for(int i=0;i<count;i++){
+                JFChannel ch;
+                if(!xmb_livetv_get(i,&ch)||!surf_id_ok(ch.id)){surf_pool.count=0;break;}
+                surf_pool.keys[surf_pool.count++]=surf_hash(ch.id);
+            }
+            surf_pool_valid=surf_pool_finish(&surf_pool);
+        }
+        if(surf_pool_valid){
+            xmb_livetv_surf_load(&surf_store);
+            surf_checkpoint=surf_restore(&surf_store,xmb_livetv_surf_scope(),&surf_pool,item->id);
+            if(xmb_livetv_surf_requested()){
+                surf_clock_toggle(&surf_clock,timing_get_us(),ps.frame_count);
+                surf_clock.remaining_us=(uint64_t)surf_checkpoint.remaining*1000000ULL;
+            }
+        }
+    }
+    auto save_surf = [&](u64 now) {
+        if(!surf_pool_valid||!surf_confirmed||surf_clock.mode==SURF_OFF)return;
+        snprintf(surf_checkpoint.channel,sizeof surf_checkpoint.channel,"%s",item->id);
+        surf_checkpoint.remaining=surf_clock_seconds(&surf_clock);
+        surf_store_put(&surf_store,&surf_checkpoint);
+        xmb_livetv_surf_save(&surf_store);
+        surf_saved_us=now;
+    };
+    auto surf_pick = [&](int at,int direction) {
+        const int count=xmb_livetv_count();
+        int to=at;
+        for(int i=0;i<count;i++){
+            to=livetv_step_channel(to,count,direction);
+            if(to<0||to==at)break;
+            JFChannel ch;
+            if(xmb_livetv_get(to,&ch)&&!live_is_dead(ch.id)&&
+               !surf_seen(&surf_checkpoint,surf_rank(&surf_pool,ch.id)))return to;
+        }
+        return -1;
+    };
 
     // ---- Main (display) loop ----
     while (running && ps.playing && !s_vdec_error) {
@@ -1774,28 +1822,41 @@ void show_player_run(const JFItem *item, u32 resume_secs,
         bool        live_changed = false;
         if (live) {
             const u64 now_lv = timing_get_us();
-            if (BTN_PRESSED(l3) && !hud_menu_open() && !g_sys_overlay) {
+            if (BTN_PRESSED(l3) && !hud_menu_open() && !g_sys_overlay && surf_pool_valid) {
+                const bool was_off=surf_clock.mode==SURF_OFF;
                 surf_clock_toggle(&surf_clock,now_lv,ps.frame_count);
+                if(was_off)surf_clock.remaining_us=(uint64_t)surf_checkpoint.remaining*1000000ULL;
+                save_surf(now_lv);
                 hud_set_banner(live_ch.name,
                     surf_clock.mode==SURF_RUNNING ? "Surf running" : "Surf paused",
                     now_lv+LIVE_BANNER_US);
             }
-            if (ps.frame_count>0 && ps.frame_count!=surf_last_frame && strcmp(surf_recorded,item->id)) {
+            if (ps.frame_count>0 && ps.frame_count!=surf_last_frame) surf_confirmed=true;
+            if (surf_confirmed && strcmp(surf_recorded,item->id)) {
                 snprintf(surf_recorded,sizeof surf_recorded,"%s",item->id);
                 xmb_livetv_record_played(item->id);
             }
             surf_last_frame=ps.frame_count;
             const bool due = surf_clock_step(&surf_clock,now_lv,ps.frame_count,
                 ps.paused || g_sys_overlay || hud_menu_open() || live_target>=0);
+            if (surf_clock.mode==SURF_RUNNING && surf_confirmed &&
+                now_lv-surf_saved_us>=SURF_CHECKPOINT_US)save_surf(now_lv);
             if (due && act==HUD_ACTION_NONE && live_target<0) {
                 const int at=xmb_livetv_index_of(item->id);
-                const int to=live_step_alive(at,xmb_livetv_count(),+1);
+                surf_mark(&surf_checkpoint,surf_rank(&surf_pool,item->id));
+                int to=surf_pick(at,+1);
+                if(to<0){
+                    surf_next_cycle(&surf_checkpoint);
+                    to=surf_pick(at,+1);
+                }
+                save_surf(now_lv);
                 JFChannel ch;
                 if (to>=0 && xmb_livetv_get(to,&ch)) {
                     live_target=to;live_dir=+1;live_press_us=now_lv;
                     live_banner(&ch,live_utc);
                 } else {
                     surf_clock_new_channel(&surf_clock,now_lv,ps.frame_count);
+                    save_surf(now_lv);
                 }
             }
             if (act == HUD_ACTION_CHANNEL_NEXT || act == HUD_ACTION_CHANNEL_PREV) {
@@ -1819,6 +1880,8 @@ void show_player_run(const JFItem *item, u32 resume_secs,
                 const int to = live_target;
                 live_target = -1;
                 if (to != xmb_livetv_index_of(item->id) && xmb_livetv_get(to, &ch)) {
+                    save_surf(now_lv);
+                    surf_confirmed=false;
                     live_adopt(ch);
                     live_watch_channel_changed(&live_w);
                     live_hud_next(ch.id);
@@ -1897,7 +1960,12 @@ void show_player_run(const JFItem *item, u32 resume_secs,
                 snprintf(g_prog.item, sizeof g_prog.item, "%s", item->id);
                 snprintf(g_prog.live_id, sizeof g_prog.live_id, "%s", ps.source.live_stream_id);
                 live_watch_opened(&live_w, timing_get_us());
-                if (live_changed) surf_clock_new_channel(&surf_clock,timing_get_us(),ps.frame_count);
+                if (live_changed) {
+                    surf_clock_new_channel(&surf_clock,timing_get_us(),ps.frame_count);
+                    surf_confirmed=false;
+                    surf_recorded[0]=0;
+                    surf_saved_us=0;
+                }
                 else surf_clock_rebase(&surf_clock,timing_get_us(),ps.frame_count);
                 surf_last_frame=ps.frame_count;
                 if (seek_ok && live_changed) { live_hud_channel(&live_ch, live_utc); live_banner(&live_ch, live_utc); }
@@ -2020,6 +2088,7 @@ void show_player_run(const JFItem *item, u32 resume_secs,
         flip_queued = true;
     }
 
+    if(live)save_surf(timing_get_us());
     crash_log("p11 loop exit");
     {
         char buf[96];

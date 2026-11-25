@@ -9,3 +9,9 @@ int  xmb_livetv_index_of(const char *channel_id);
 
 // Record a decoded channel without rebuilding the active page.
 void xmb_livetv_record_played(const char *channel_id);
+
+struct SurfStore;
+uint64_t xmb_livetv_surf_scope(void);
+bool xmb_livetv_surf_requested(void);
+bool xmb_livetv_surf_load(SurfStore *store);
+bool xmb_livetv_surf_save(const SurfStore *store);

@@ -1,5 +1,6 @@
 #pragma once
 #include <stdint.h>
+#include <stdbool.h>
 
 // Live reserve lengths offered in Settings > Playback > Live TV Buffer.
 #define LIVE_BUFFER_STEPS 3
@@ -12,6 +13,16 @@ static inline unsigned live_buffer_seconds(int step) {
 
 // The read-ahead ring a live channel may take.
 #define LIVE_RING_BYTES_MAX (6u * 1024u * 1024u)
+#define LIVE_RING_HEADROOM (8u * 1024u * 1024u)
+#define LIVE_RING_MIN (2u * 1024u * 1024u)
+// Under memory pressure, reserve space for the next decoder open and UI.
+// 0 means run with the existing unbuffered fallback rather than overcommit.
+static inline uint32_t live_ring_budget(uint32_t available,bool known) {
+    if(!known)return LIVE_RING_MIN;
+    if(available<LIVE_RING_HEADROOM+LIVE_RING_MIN)return 0;
+    uint32_t want=available-LIVE_RING_HEADROOM;
+    return want>LIVE_RING_BYTES_MAX?LIVE_RING_BYTES_MAX:want;
+}
 
 // How long the wait may run past the reserve itself before playing anyway.
 #define LIVE_BUFFER_GRACE_US 12000000ULL
