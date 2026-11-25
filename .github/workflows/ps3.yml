@@ -1,0 +1,90 @@
+name: Jellop PS3
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: jellop-ps3-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  source:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    permissions:
+      contents: write
+    outputs:
+      revision: ${{ steps.revision.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Import pinned native baseline once
+        if: ${{ hashFiles('Makefile') == '' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          upstream="$RUNNER_TEMP/jellop-upstream"
+          stage="$RUNNER_TEMP/jellop-source"
+          mkdir -p "$stage"
+          git init "$upstream"
+          git -C "$upstream" remote add origin https://github.com/mghazalyh/JellyFin-PS3.git
+          git -C "$upstream" fetch --depth=1 origin d71be13498e7888b3f12038e47a0c70d8c9974b0
+          test "$(git -C "$upstream" rev-parse FETCH_HEAD)" = d71be13498e7888b3f12038e47a0c70d8c9974b0
+          git -C "$upstream" archive FETCH_HEAD | tar -x -C "$stage"
+          python3 port/apply_baseline.py "$stage"
+          cp "$stage/README.md" "$stage/docs/UPSTREAM-README.md"
+          rsync -a --exclude='/.github/' --exclude='/README.md' --exclude='/release/*.pkg' "$stage/" ./
+          test -f LICENSE && test -f NOTICE && test -f CREDITS.md
+          git add .
+          git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' commit -m 'Import pinned JellyFin PS3 baseline with Jellop native resource and metadata changes'
+          git push origin HEAD:main
+      - name: Resolve exact build revision
+        id: revision
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+  host:
+    needs: source
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.source.outputs.revision }}
+      - name: Native programme and resource regression
+        run: |
+          g++ -std=c++11 -Wall -Wextra -O2 port/test_programme.cpp source/api/livetv.cpp -o /tmp/test-jellop
+          /tmp/test-jellop
+      - name: Upstream Live TV and stream regressions
+        working-directory: tests
+        run: |
+          make -f Makefile.host -j2 test_livetv test_live_watch test_livetv_prefs test_livetv_quality test_stream_request test_stream_budget
+          for t in test_livetv test_live_watch test_livetv_prefs test_livetv_quality test_stream_request test_stream_budget; do "./$t"; done
+      - name: Companion service tests
+        run: |
+          if test -d server; then python3 -m unittest discover -s server -p 'test_*.py'; fi
+  package:
+    needs: [source, host]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.source.outputs.revision }}
+      - name: Fetch pinned hardware-compatible SDK
+        run: |
+          curl --fail --location --retry 2 --max-time 180 -o tools/ps3dev-linux-X64.tar.gz https://github.com/ps3dev/ps3dev/releases/download/nightly-2026-07-26/ps3dev-linux-X64.tar.gz
+          echo 'dcbed747e094c6a382dae5b0aacc322a1d4390d9f2849a7d750a96ea398ee8ab  tools/ps3dev-linux-X64.tar.gz' | sha256sum -c -
+          docker build -f tools/Dockerfile.ps3 -t jellop-build:2026-07-26 tools
+      - name: Cross-compile and verify package
+        run: |
+          docker run --rm -v "$PWD:/build" jellop-build:2026-07-26 make -j2 pkg
+          docker run --rm -v "$PWD:/build:ro" jellop-build:2026-07-26 python3 tools/verify_pkg.py
+          mkdir -p dist
+          cp JellyFin-PS3.gnpdrm.pkg dist/Jellop.pkg
+          (cd dist && sha256sum Jellop.pkg > Jellop.pkg.sha256)
+          git rev-parse HEAD > dist/source-revision.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Jellop-PS3-candidate
+          path: dist/
+          if-no-files-found: error
+          retention-days: 14
