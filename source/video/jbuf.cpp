@@ -83,7 +83,8 @@ bool jbuf_reserve(u32 fw, u32 fh, bool compact) {
     u32 need = vid_frame_bytes(fw, fh);
     // From the size about to be reserved, not from any toggle — see
     // jbuf_cap_for_bytes.
-    int cap  = jbuf_cap_for_bytes(need);
+    const bool compact_bridge=compact && need<=vid_frame_bytes(1280,720);
+    int cap = compact_bridge ? JBUF_BRIDGE_SLOTS : jbuf_cap_for_bytes(need);
     s_jb_cap = cap;
 
     // Drop any slots beyond the active capacity (saves RAM at 1080p).

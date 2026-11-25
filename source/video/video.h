@@ -29,7 +29,8 @@
 // frames do, so six slots (18 MB of decoded video, 0.25 s) moved into
 // the ring is worth several SECONDS of burst tolerance.  Ten slots is
 // still comfortably above JBUF_PREFILL.
-#define JBUF_SD_SLOTS     24   // ring slots on the 720p path       (~32 MB)
+#define JBUF_SD_SLOTS     24   // ring slots on the ordinary 720p path (~32 MiB)
+#define JBUF_BRIDGE_SLOTS 12   // bridge 720p maximum (~15.8 MiB)
 // The static ring arrays are sized for the LARGER of the two active counts;
 // jbuf_cap() picks how many are actually used per path.
 #define JBUF_MAX_SLOTS    24

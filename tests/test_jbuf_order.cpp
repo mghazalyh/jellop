@@ -101,7 +101,8 @@ static void compact_bridge_slots(void) {
     CHECK(jbuf_reserve(1280,720,true), "compact bridge reserve");
     CHECK(s_jbuf_largest_bytes==vid_frame_bytes(1280,720), "all large buffers reclaimed");
     CHECK(jbuf_slot_bytes()==vid_frame_bytes(1280,720), "bridge slot bytes");
-    CHECK(jbuf_cap()==JBUF_SD_SLOTS, "bridge capacity");
+    CHECK(jbuf_cap()==JBUF_BRIDGE_SLOTS, "bridge capacity");
+    CHECK((u64)jbuf_cap()*jbuf_slot_bytes() < (u64)JBUF_1080_SLOTS*hd_bytes, "compact reserve must reduce memory");
     CHECK(jbuf_alloc(1920,1080), "ordinary live HD restored");
     CHECK(jbuf_slot_bytes()==vid_frame_bytes(1920,1080), "restored safety slot");
     jbuf_free();
