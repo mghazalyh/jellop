@@ -21,3 +21,5 @@ Native channel switching explicitly closes the previous bridge transcode using t
 ## Storage and retry isolation
 
 Jellop uses its own `/dev_hdd0/tmp/jellop` scratch directory, separate PS3 savedata identity, and `jellop_offline` media directories. It does not import the original application's temporary login or preferences. Login errors are logged as status codes only. Surf keeps the sole healthy channel instead of manufacturing cycle rollovers. Failed opens receive a five-minute local cooldown, never an automatic gateway ban. The existing native save-data fallback may lose scratch state after a reboot; permanent save failures are logged rather than claimed as successful.
+
+For bridge-backed Live TV, the validated 720p output contract permits a compact 24-slot 720p decoded frame buffer instead of the ordinary 16-slot 1080p safety reserve. Oversize frames are still rejected before they can overwrite a slot. The decoder's existing HD setup and arena remain intact. Cached larger slots are reclaimed only when starting this bridge mode, not while decoding. The memory savings are theoretical until physical measurement.

@@ -660,10 +660,14 @@ bool vdec_pull_frame(void) {
     {
         static int s_sw_count = 0;
         if (s_sw_count < 60) {
-            u32 centre_px = ((u32*)jbuf_write_ptr())[(jbuf_fh() / 2) * jbuf_fw() + (jbuf_fw() / 2)];
+            // The hardware output is planar YUV420, not 32-bit ARGB.
+            // Read a single luma byte and never address beyond the slot.
+            const u32 centre = (jbuf_fh()/2)*jbuf_fw()+jbuf_fw()/2;
+            const u8 *pixels = jbuf_write_ptr();
+            const unsigned luma = pixels && centre<jbuf_slot_bytes() ? pixels[centre] : 0;
             char buf[64];
-            snprintf(buf, sizeof(buf), "slot_write: slot=%d px=0x%08x",
-                jbuf_write_idx(), centre_px);
+            snprintf(buf, sizeof(buf), "slot_write: slot=%d Y=0x%02x",
+                jbuf_write_idx(), luma);
             plog(buf);
             s_sw_count++;
         }

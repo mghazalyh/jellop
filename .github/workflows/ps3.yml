@@ -70,8 +70,8 @@ jobs:
       - name: Upstream Live TV and stream regressions
         working-directory: tests
         run: |
-          make -f Makefile.host -j2 test_livetv test_live_watch test_livetv_prefs test_livetv_quality test_stream_request test_stream_budget
-          for t in test_livetv test_live_watch test_livetv_prefs test_livetv_quality test_stream_request test_stream_budget; do "./$t"; done
+          make -f Makefile.host -j2 test_livetv test_live_watch test_livetv_prefs test_livetv_quality test_stream_request test_stream_budget test_jbuf_order
+          for t in test_livetv test_live_watch test_livetv_prefs test_livetv_quality test_stream_request test_stream_budget test_jbuf_order; do "./$t"; done
       - name: Companion service tests
         run: |
           if test -d server; then

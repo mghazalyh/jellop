@@ -1299,8 +1299,13 @@ void show_player_run(const JFItem *item, u32 resume_secs,
     // smallest HLS variant and sends the source's 1920x1080 regardless of
     // MaxWidth/MaxHeight (2026-10-21).
     u32 alloc_w = ps.req_w, alloc_h = ps.req_h;
-    if (live && alloc_w * alloc_h < 1920u * 1080u) { alloc_w = 1920; alloc_h = 1080; }
-    if (!jbuf_alloc(alloc_w, alloc_h)) {
+    // Only a validated Jellop bridge contract has a hard 720p output cap.
+    // Keep the decoder arena and its HD mode, and keep the oversize-picture
+    // guard in vdec.cpp. Ordinary Jellyfin servers retain 1080p slots.
+    const bool bridge_live = live && ps.source.jellop_revision>0;
+    if (bridge_live) { alloc_w=1280; alloc_h=720; }
+    else if (live && alloc_w * alloc_h < 1920u * 1080u) { alloc_w = 1920; alloc_h = 1080; }
+    if (!jbuf_alloc(alloc_w, alloc_h, bridge_live)) {
         plog("show_player: jbuf_alloc FAILED");
         live_abort();
         player_startup_abort();

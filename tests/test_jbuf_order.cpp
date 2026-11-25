@@ -92,7 +92,22 @@ static void discontinuity(void) {
     jbuf_free();
 }
 
+static void compact_bridge_slots(void) {
+    CHECK(jbuf_reserve(1920,1080), "HD reserve");
+    const u32 hd_bytes=s_jbuf_largest_bytes;
+    CHECK(hd_bytes==vid_frame_bytes(1920,1080), "HD slot bytes");
+    CHECK(jbuf_reserve(1280,720), "normal SD reserve");
+    CHECK(s_jbuf_largest_bytes==hd_bytes, "legacy cache retained");
+    CHECK(jbuf_reserve(1280,720,true), "compact bridge reserve");
+    CHECK(s_jbuf_largest_bytes==vid_frame_bytes(1280,720), "all large buffers reclaimed");
+    CHECK(jbuf_slot_bytes()==vid_frame_bytes(1280,720), "bridge slot bytes");
+    CHECK(jbuf_cap()==JBUF_SD_SLOTS, "bridge capacity");
+    CHECK(jbuf_alloc(1920,1080), "ordinary live HD restored");
+    CHECK(jbuf_slot_bytes()==vid_frame_bytes(1920,1080), "restored safety slot");
+    jbuf_free();
+}
 int main() {
+    compact_bridge_slots();
     full_queue(1920, 1080);   // 8-slot 1080p ring
     full_queue(1280, 720);    // 24-slot ring
     pixels_follow();

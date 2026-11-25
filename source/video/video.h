@@ -44,7 +44,7 @@ void vdec_set_force_hd(bool on);
 // once at startup (main.cpp) and cached forever — allocated per-session they
 // raced the UI for a heap with only a few MB of slack and lost at random.
 void vdec_reserve_mem(void);
-bool jbuf_reserve(u32 fw, u32 fh);
+bool jbuf_reserve(u32 fw, u32 fh, bool compact = false);
 // Free the cached decoder arena + AU buffers (normally never called; the
 // reservation is permanent by design).
 void vdec_release_mem(void);
@@ -84,7 +84,7 @@ bool video_feed_ts(const u8 *pkt);
 bool video_feed_ts_audio_only(const u8 *pkt);
 
 // ---- Jitter buffer ----
-bool         jbuf_alloc(u32 fw, u32 fh);
+bool         jbuf_alloc(u32 fw, u32 fh, bool compact = false);
 void         jbuf_set_front_locked(int n); // front slots never reordered (1, or 2 when blending)
 int          jbuf_cap(void);            // active ring capacity (<= JBUF_MAX_SLOTS)
 int          jbuf_prefill_target(void); // frames to prefill (<= capacity)

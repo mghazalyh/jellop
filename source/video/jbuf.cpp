@@ -32,7 +32,8 @@ static volatile int s_jb_n = 0;
 // three (VDEC arena, these slots, HUD overlay) total ~162MB against a heap
 // with only a few MB of slack, so allocating them per-session made every
 // session a dice roll on whatever the UI had done to the heap layout.
-static u32 s_jbuf_slot_bytes = 0;     // capacity of each cached slot
+static u32 s_jbuf_slot_bytes = 0;     // minimum capacity of each cached slot
+static u32 s_jbuf_largest_bytes = 0;  // upper bound on retained slot sizes
 static int s_jb_cap = JBUF_SD_SLOTS;  // active ring capacity (set by jbuf_reserve)
 
 // Active ring capacity: fewer slots for 1080p so the big frames fit.  The ring
@@ -78,7 +79,7 @@ u32 vid_frame_bytes(u32 fw, u32 fh) {
 // larger slots.  When the capacity later grows back (1080p -> 720p) the extra
 // slots are (re)allocated here, and when it shrinks the surplus is freed, so
 // the producer never dereferences a NULL slot below the active capacity.
-bool jbuf_reserve(u32 fw, u32 fh) {
+bool jbuf_reserve(u32 fw, u32 fh, bool compact) {
     u32 need = vid_frame_bytes(fw, fh);
     // From the size about to be reserved, not from any toggle — see
     // jbuf_cap_for_bytes.
@@ -91,11 +92,11 @@ bool jbuf_reserve(u32 fw, u32 fh) {
     }
     // If the cached slots are too small for this frame size, they must all be
     // re-grabbed at the new size.
-    if (s_jbuf_slot_bytes < need) {
+    if (s_jbuf_slot_bytes < need || (compact && s_jbuf_largest_bytes > need)) {
         for (int i = 0; i < JBUF_MAX_SLOTS; i++) {
             if (s_jbuf_data[i]) { free(s_jbuf_data[i]); s_jbuf_data[i] = NULL; }
         }
-        s_jbuf_slot_bytes = 0;
+        s_jbuf_slot_bytes = s_jbuf_largest_bytes = 0;
     }
     // Ensure every active slot is allocated (>= need bytes).
     for (int i = 0; i < cap; i++) {
@@ -107,16 +108,17 @@ bool jbuf_reserve(u32 fw, u32 fh) {
                      i, cap, need / 1024);
             plog(buf);
             for (int j = 0; j < i; j++) { free(s_jbuf_data[j]); s_jbuf_data[j] = NULL; }
-            s_jbuf_slot_bytes = 0;
+            s_jbuf_slot_bytes = s_jbuf_largest_bytes = 0;
             return false;
         }
     }
     s_jbuf_slot_bytes = need;
+    if (s_jbuf_largest_bytes < need) s_jbuf_largest_bytes = need;
     return true;
 }
 
-bool jbuf_alloc(u32 fw, u32 fh) {
-    if (!jbuf_reserve(fw, fh)) return false;
+bool jbuf_alloc(u32 fw, u32 fh, bool compact) {
+    if (!jbuf_reserve(fw, fh, compact)) return false;
     s_jbuf_fw = fw; s_jbuf_fh = fh;
     s_jb_wr = s_jb_rd = s_jb_n = 0;
     memset(s_jbuf_pts, 0, sizeof(s_jbuf_pts));
