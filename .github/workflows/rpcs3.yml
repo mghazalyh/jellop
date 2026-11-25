@@ -53,7 +53,7 @@ jobs:
       - name: Install graphical runtime dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y xvfb xauth libgl1-mesa-dri libglx-mesa0 libopengl0 libegl1 libxkbcommon-x11-0 libxcb-cursor0 libxcb-xinerama0 libxcb-icccm4 libxcb-keysyms1 libxcb-render-util0 libasound2t64 libpulse0 ffmpeg imagemagick
+          sudo apt-get install -y xvfb xauth libgl1-mesa-dri libglx-mesa0 libopengl0 libegl1 libxkbcommon-x11-0 libxcb-cursor0 libxcb-xinerama0 libxcb-icccm4 libxcb-keysyms1 libxcb-render-util0 libasound2t64 libpulse0 libpipewire-0.3-0t64 ffmpeg imagemagick
       - name: Download pinned RPCS3 and official firmware
         run: |
           set -euo pipefail
@@ -73,8 +73,34 @@ jobs:
           printf 'Video:\n  Renderer: Null\nAudio:\n  Renderer: Null\n' > "$XDG_CONFIG_HOME/rpcs3/config.yml"
           set -o pipefail
           timeout 30 "$RUNNER_TEMP/squashfs-root/AppRun" --headless --version 2>&1 | tee smoke/version.log
-          timeout 420 "$RUNNER_TEMP/squashfs-root/AppRun" --headless --installfw "$RUNNER_TEMP/PS3UPDAT.PUP" --installpkg "$PWD/dist/Jellop-RPCS3.pkg" 2>&1 | tee smoke/install.log
-          test -f "$XDG_CONFIG_HOME/rpcs3/dev_hdd0/game/JELP30001/USRDIR/EBOOT.BIN"
+          # RPCS3's headless installer can abort on teardown (fixed_typemap).
+          # Only tolerate that specific exit if RPCS3 logged successful
+          # installation and the required on-disk postconditions are met.
+          run_install() {
+            local mode="$1" input="$2" success="$3" rc=0
+            timeout 420 "$RUNNER_TEMP/squashfs-root/AppRun" --headless "$mode" "$input" > "smoke/$mode.stdout.log" 2>&1 || rc=$?
+            cat "smoke/$mode.stdout.log"
+            local log="$XDG_CACHE_HOME/rpcs3/RPCS3.log"
+            if test -f "$log"; then cp "$log" "smoke/$mode.rpcs3.log"; fi
+            if test -f "$log.gz"; then gzip -cd "$log.gz" > "smoke/$mode.rpcs3.previous.log" || true; fi
+            if ! grep -aE "$success" "smoke/$mode.stdout.log" "smoke/$mode.rpcs3.log" "smoke/$mode.rpcs3.previous.log" 2>/dev/null; then
+              echo "Installer did not record expected success: $mode"
+              tail -n 60 "smoke/$mode.rpcs3.log" 2>/dev/null || true
+              return 1
+            fi
+            if test "$rc" != 0; then
+              test "$rc" = 134 && grep -F 'manual_typemap' "smoke/$mode.stdout.log" || return "$rc"
+              echo "::warning::RPCS3 aborted on teardown after confirmed installer success"
+            fi
+          }
+          run_install --installfw "$RUNNER_TEMP/PS3UPDAT.PUP" 'Successfully installed PS3 firmware version 4.93'
+          test -s "$XDG_CONFIG_HOME/rpcs3/dev_flash/vsh/module/vsh.self"
+          test -s "$XDG_CONFIG_HOME/rpcs3/dev_flash/sys/external/liblv2.sprx"
+          run_install --installpkg "$PWD/dist/Jellop-RPCS3.pkg" 'Successfully installed .*title_id=JELP30001'
+          game="$XDG_CONFIG_HOME/rpcs3/dev_hdd0/game/JELP30001"
+          test -s "$game/USRDIR/EBOOT.BIN"
+          test -s "$game/PARAM.SFO"
+          python3 -c 'from pathlib import Path; import sys; p=Path(sys.argv[1]); assert (p/"USRDIR/EBOOT.BIN").read_bytes()[:4] == b"SCE\0"; assert b"JELP30001" in (p/"PARAM.SFO").read_bytes()' "$game"
       - name: Actual graphical playback and Surf transition
         run: |
           xvfb-run -a -s '-screen 0 1280x720x24' python3 tools/rpcs3_smoke.py --emulator "$RUNNER_TEMP/squashfs-root/AppRun" --root "$XDG_CONFIG_HOME/rpcs3" --output smoke
