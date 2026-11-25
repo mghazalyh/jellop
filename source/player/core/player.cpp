@@ -1354,7 +1354,11 @@ void show_player_run(const JFItem *item, u32 resume_secs,
         // one at the highest live rate.  With full-size live slots the
         // three-quarter rule took 15 MB and left 4.6 MB, and a channel
         // change froze reopening the decoder in that (2026-10-21).
-        if(live)want=live_ring_budget(avail,known);
+        if(live){
+            want=live_ring_budget(avail,known);
+            const unsigned limit=ps.source.jellop_ring_mib;
+            if(limit>=2&&limit<=6&&want>limit*1024u*1024u)want=limit*1024u*1024u;
+        }
         if(want)decode_ring_alloc(want);
         char ringlog[100];snprintf(ringlog,sizeof ringlog,"ring: live=%d available=%u request=%u packets=%d",(int)live,avail,want,decode_ring_cap());plog(ringlog);
     }
@@ -1602,7 +1606,8 @@ void show_player_run(const JFItem *item, u32 resume_secs,
     LiveWatch live_w;
     live_watch_init(&live_w, timing_get_us());
     SurfClock surf_clock;
-    surf_clock_init(&surf_clock, 60);
+    const unsigned configured_dwell=ps.source.jellop_dwell_seconds;
+    surf_clock_init(&surf_clock,configured_dwell>=15&&configured_dwell<=600?configured_dwell:60);
     char surf_recorded[40] = "";
     int surf_last_frame = ps.frame_count;
     SurfPool surf_pool={};
@@ -1625,7 +1630,7 @@ void show_player_run(const JFItem *item, u32 resume_secs,
         }
         if(surf_pool_valid){
             xmb_livetv_surf_load(&surf_store);
-            surf_checkpoint=surf_restore(&surf_store,xmb_livetv_surf_scope(),&surf_pool,item->id);
+            surf_checkpoint=surf_restore(&surf_store,xmb_livetv_surf_scope(),&surf_pool,item->id,(unsigned)(surf_clock.dwell_us/1000000ULL));
             if(xmb_livetv_surf_requested()){
                 surf_clock_toggle(&surf_clock,timing_get_us(),ps.frame_count);
                 surf_clock.remaining_us=(uint64_t)surf_checkpoint.remaining*1000000ULL;
@@ -1988,6 +1993,11 @@ void show_player_run(const JFItem *item, u32 resume_secs,
                 g_prog.evidence_frames=g_prog.evidence_ms=g_prog.evidence_stalls=0;
                 __sync_synchronize();g_prog.evidence_seq++;
                 evidence_published=0;
+                const unsigned next_dwell=ps.source.jellop_dwell_seconds;
+                if(next_dwell>=15&&next_dwell<=600){
+                    surf_clock.dwell_us=(uint64_t)next_dwell*1000000ULL;
+                    if(surf_clock.remaining_us>surf_clock.dwell_us)surf_clock.remaining_us=surf_clock.dwell_us;
+                }
                 if (live_changed) {
                     surf_clock_new_channel(&surf_clock,timing_get_us(),ps.frame_count);
                     surf_confirmed=false;

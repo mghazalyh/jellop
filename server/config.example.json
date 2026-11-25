@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "revision": 1,
+  "surfDwellSeconds": 60,
+  "liveRingMiB": 6,
+  "maxVideoBitrate": 4000000,
+  "maxWidth": 1280,
+  "maxHeight": 720
+}

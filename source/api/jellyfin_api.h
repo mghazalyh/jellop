@@ -187,6 +187,7 @@ typedef struct {
     // Playing it is the server's HTTP 500.  Only the item says so:
     // PlaybackInfo gives every Gelato source, real ones too, Path "/stub".
     bool     placeholder;
+    unsigned jellop_revision,jellop_dwell_seconds,jellop_ring_mib;
     JFTracks tracks;
 } JFMediaSource;
 

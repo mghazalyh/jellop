@@ -6,6 +6,7 @@
 #include <ctype.h>
 
 #include "jellyfin_api.h"
+#include "jellop_config.h"
 #include "json_unescape.h"   // \u0027 & co. -> UTF-8
 #include "plog.h"
 #include "hd1080.h"
@@ -951,7 +952,15 @@ bool jellyfin_get_playback_info(const char *item_id,
     JFMediaSource selected;
     bool have_selected = jellyfin_parse_selected_media_source(
         responseBuffer, media_source_id, &selected);
-    if (out_selected && have_selected) *out_selected = selected;
+    if (out_selected && have_selected) {
+        JellopConfig cfg;
+        if(jellop_config_parse(responseBuffer,&cfg)){
+            selected.jellop_revision=cfg.revision;
+            selected.jellop_dwell_seconds=cfg.dwell_seconds;
+            selected.jellop_ring_mib=cfg.ring_mib;
+        }
+        *out_selected = selected;
+    }
 
     if (out_total_secs) {
         // A top-level search sees the first source's RunTimeTicks.  Prefer the

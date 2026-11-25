@@ -17,6 +17,7 @@ import urllib.error
 import urllib.parse as url
 import urllib.request as request
 from collections import OrderedDict
+from config import Config, DEFAULT
 
 MAX_JSON = 2 * 1024 * 1024
 MAX_BODY = 64 * 1024
@@ -109,13 +110,14 @@ def media_source(cid):
                             {"Type":"Audio","Index":1,"Codec":"mp3","Channels":2,
                              "SampleRate":48000,"IsDefault":True}]}
 
-def ffmpeg_args(binary,source,q):
+def ffmpeg_args(binary,source,q,config=None):
+    config=DEFAULT if config is None else config
     # The client may request 1080p or higher bitrates; the bridge clamps the
     # actual output to 720p30 and 4 Mbps video (with bounded audio).
-    width=number(q,"MaxWidth",1280,320,1280)
-    height=number(q,"MaxHeight",720,180,720)
+    width=number(q,"MaxWidth",1280,320,config["maxWidth"])
+    height=number(q,"MaxHeight",720,180,config["maxHeight"])
     width-=width%2; height-=height%2
-    rate=number(q,"VideoBitrate",3500000,500000,4000000)
+    rate=number(q,"VideoBitrate",3500000,500000,config["maxVideoBitrate"])
     return [binary,"-nostdin","-hide_banner","-loglevel","error",
             "-rw_timeout","12000000","-protocol_whitelist","http,https,tcp,tls,crypto",
             "-i",source,"-map","0:v:0","-map","0:a:0?",
@@ -128,8 +130,9 @@ def ffmpeg_args(binary,source,q):
             "-f","mpegts","-mpegts_flags","+resend_headers","-flush_packets","1","pipe:1"]
 
 class Bridge:
-    def __init__(self,upstream,binary="ffmpeg"):
+    def __init__(self,upstream,binary="ffmpeg",config_path=None):
         self.base=origin(upstream)
+        self.config=Config(config_path)
         self.binary=binary
         self.opener=request.build_opener(NoRedirect(),request.ProxyHandler({}))
         self.lock=threading.Lock()
@@ -266,6 +269,9 @@ class Bridge:
             return self.upstream(path,method=method,body=body)
         token=client_token(headers,q)
         if path=="/Jellop/Diagnostics" and method=="GET":return self.diagnostics(token)
+        if path=="/Jellop/Config" and method=="GET":
+            self.catalogue(token,fresh=True)
+            return {"JellopConfig":self.config.snapshot(),"Fault":self.config.fault}
         if path=="/LiveTv/Channels" and method=="GET":
             return page_rows(filtered_channels(self.catalogue(token),q),q)
         if re.fullmatch(r"/Users/[^/]+/Views",path) and method=="GET":
@@ -303,7 +309,7 @@ class Bridge:
             cid=m[1];auto=first(q,"AutoOpenLiveStream","true").casefold()!="false"
             sid,source=self.resolve(token,cid,auto=auto)
             self.remember(token,cid,sid,source)
-            return {"PlaySessionId":sid,"MediaSources":[media_source(cid)]}
+            return {"PlaySessionId":sid,"MediaSources":[media_source(cid)],"JellopConfig":self.config.snapshot()}
         if FAVORITE.fullmatch(path) and method in ("POST","DELETE"):
             result=self.upstream(path,token,method,body if method=="POST" else None)
             with self.lock:self.catalogues.pop(token,None)
@@ -358,7 +364,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         proc=None;started=False;sid="";reason="startup-error"
         try:
             sid,source=b.resolve(token,cid,session=first(q,"PlaySessionId"))
-            proc=subprocess.Popen(ffmpeg_args(b.binary,source,q),stdin=subprocess.DEVNULL,
+            proc=subprocess.Popen(ffmpeg_args(b.binary,source,q,b.config.snapshot()),stdin=subprocess.DEVNULL,
                                   stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,bufsize=0)
             with selectors.DefaultSelector() as sel:
                 sel.register(proc.stdout,selectors.EVENT_READ)
@@ -437,7 +443,8 @@ def main():
     parser.add_argument("--bind",default="127.0.0.1")
     parser.add_argument("--port",type=int,default=18800)
     parser.add_argument("--ffmpeg",default="ffmpeg")
+    parser.add_argument("--config",help="Optional bounded JSON configuration file")
     args=parser.parse_args()
-    with Server((args.bind,args.port),Bridge(args.upstream,args.ffmpeg)) as server:
+    with Server((args.bind,args.port),Bridge(args.upstream,args.ffmpeg,args.config)) as server:
         server.serve_forever()
 if __name__=="__main__":main()

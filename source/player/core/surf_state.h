@@ -70,14 +70,15 @@ static inline void surf_next_cycle(SurfCheckpoint *c) {
     memset(c->visited,0,sizeof c->visited);
     c->cycle=c->cycle==0xffffffffu?1:c->cycle+1;
 }
-static inline SurfCheckpoint surf_restore(const SurfStore *s,uint64_t scope,const SurfPool *p,const char *id) {
-    SurfCheckpoint c={};c.scope=scope;c.pool=p->fingerprint;c.cycle=1;c.remaining=60;
+static inline SurfCheckpoint surf_restore(const SurfStore *s,uint64_t scope,const SurfPool *p,const char *id,unsigned dwell=60) {
+    if(dwell<15||dwell>600)dwell=60;
+    SurfCheckpoint c={};c.scope=scope;c.pool=p->fingerprint;c.cycle=1;c.remaining=dwell;
     for(unsigned i=0;i<SURF_SLOTS;i++)if(s->slots[i].scope==scope){
         c=s->slots[i];
         if(c.pool!=p->fingerprint){c.pool=p->fingerprint;surf_next_cycle(&c);}
         break;
     }
-    if(!id||strcmp(c.channel,id)||surf_rank(p,id)<0||c.remaining>60)c.remaining=60;
+    if(!id||strcmp(c.channel,id)||surf_rank(p,id)<0||c.remaining>dwell)c.remaining=dwell;
     if(surf_id_ok(id))snprintf(c.channel,sizeof c.channel,"%s",id);
     return c;
 }
