@@ -38,7 +38,8 @@ CONTENTID   := UP0001-$(APPID)_00-0000000000000000
 #---------------------------------------------------------------------------
 # Compiler flags
 #---------------------------------------------------------------------------
-CFLAGS      := -O2 -Wall -mcpu=cell $(MACHDEP) $(INCLUDE)
+BUILD_FOR_RPCS3 ?= 0
+CFLAGS      := -O2 -Wall -mcpu=cell -DBUILD_FOR_RPCS3=$(BUILD_FOR_RPCS3) $(MACHDEP) $(INCLUDE)
 
 # .S files: -mregnames so r0/r1/r2 assemble as REGISTERS rather than as
 # undefined symbols.  PSL1GHT's own sprx Makefile passes this for the same

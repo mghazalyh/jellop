@@ -25,7 +25,12 @@
 //  dev_hdd0/tmp/jellyfin_config.txt (keep the server URL on the LAN).
 // =========================================================================
 
+#ifndef BUILD_FOR_RPCS3
 #define BUILD_FOR_RPCS3 0
+#endif
+#if BUILD_FOR_RPCS3 != 0 && BUILD_FOR_RPCS3 != 1
+#error BUILD_FOR_RPCS3 must be 0 or 1
+#endif
 
 // =========================================================================
 //  PLAYER STATS INSTRUMENTATION

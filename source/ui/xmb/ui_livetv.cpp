@@ -49,6 +49,7 @@
 #include "jellyfin_api.h"
 #include "thumbnail_cache.h"
 #include "player.h"
+#include "slog.h"
 #include "surf_state.h"
 #include "user_prefs.h"
 #include "livetv_list.h"
@@ -1110,6 +1111,16 @@ void xmb_livetv_record_played(const char *id) {
     lp_note_recent(&s_prefs,id);
     prefs_save();
 }
+
+#if BUILD_FOR_RPCS3
+bool xmb_livetv_smoke_start(void) {
+    if (!s_loaded || s_n < 2) return false;
+    slog_state("JELLOP_SMOKE_CATALOGUE count=%d",s_n);
+    s_surf_requested=true;
+    play_channel(0);
+    return true;
+}
+#endif
 
 int  xmb_livetv_count(void) { return s_n; }
 bool xmb_livetv_get(int i, JFChannel *out) {

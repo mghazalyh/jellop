@@ -19,6 +19,10 @@
 #include "boot_anim.h"
 #include "thumbnail_cache.h"
 #include "slog.h"
+#if BUILD_FOR_RPCS3
+#include "jf_paths.h"
+extern bool xmb_livetv_smoke_start(void);
+#endif
 #include "plog.h"
 #include "timing.h"        // timing_get_us() — background library retry
 #include "jellyfin_api.h"   // g_auth_expired — the XMB leaves when it is set
@@ -751,6 +755,31 @@ void ui_run_xmb(void) {
             spine_at_base() && g_tabs[XMB_TAB_HOME].enabled)
             xmb_switch_tab(XMB_TAB_HOME);
 
+#if BUILD_FOR_RPCS3
+        // Explicit fixture-only driver; the normal catalogue and player run.
+        static int smoke = -1;
+        if (smoke < 0) {
+            smoke = 0;
+            FILE *f = fopen(JELLOP_TMP_DIR "/jellop_smoke.txt", "r");
+            if (f) {
+                char line[32] = "";
+                if (fgets(line, sizeof line, f) && !strcmp(line,"fixture-surf-v1\n")
+                    && !strcmp(g_server,"http://127.0.0.1:18096")
+                    && !strcmp(g_token,"fixture-token")) smoke = 1;
+                fclose(f);
+            }
+        }
+        if (smoke == 1) {
+            for (int t=0;t<XMB_TAB_COUNT;t++) if(g_tabs[t].enabled && xmb_kind(t)==TABKIND_LIVETV) {
+                if(g_active_tab!=t) xmb_switch_tab(t);
+                smoke=2;
+                slog_state("JELLOP_SMOKE_LIVETV");
+                break;
+            }
+        } else if (smoke == 2 && xmb_kind(g_active_tab)==TABKIND_LIVETV) {
+            if (xmb_livetv_smoke_start()) smoke=3;
+        }
+#endif
         tab = g_active_tab; // navigation may have opened a different Classic page
         slog_menu_tick();   // STATE: MENU ... (emulator-only, emits on change)
 

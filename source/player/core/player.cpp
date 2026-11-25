@@ -1862,6 +1862,7 @@ void show_player_run(const JFItem *item, u32 resume_secs,
             if (surf_confirmed && strcmp(surf_recorded,item->id)) {
                 snprintf(surf_recorded,sizeof surf_recorded,"%s",item->id);
                 xmb_livetv_record_played(item->id);
+                slog_state("JELLOP_LIVE_CONFIRMED channel=%s frame=%d",item->id,ps.frame_count);
             }
             surf_last_frame=ps.frame_count;
             const bool due = surf_clock_step(&surf_clock,now_lv,ps.frame_count,
@@ -1879,6 +1880,7 @@ void show_player_run(const JFItem *item, u32 resume_secs,
                 save_surf(now_lv);
                 JFChannel ch;
                 if (to>=0 && xmb_livetv_get(to,&ch)) {
+                    slog_state("JELLOP_SURF_DUE from=%s to=%s cycle=%u",item->id,ch.id,surf_checkpoint.cycle);
                     live_target=to;live_dir=+1;live_press_us=now_lv;
                     live_banner(&ch,live_utc);
                 } else {
