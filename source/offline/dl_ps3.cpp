@@ -90,7 +90,7 @@ void dl_plat_close(int h) { if (h >= 0) netClose(h); }
 // -------------------------------------------------------------------------
 // Filesystem -- lv2 syscalls, so 64-bit sizes and no PRX dependency, except
 // free space, which only libsysfs reports.  A store on a USB drive has lfs
-// paths ("usb0:/jellyfin_offline/..."): every call below sends those to lfs,
+// paths ("usb0:/jellop_offline/..."): every call below sends those to lfs,
 // which writes NTFS (source/local/lfs.h).  Media handles from lfs are offset
 // by LFS_FH so they never collide with an lv2 descriptor.
 // -------------------------------------------------------------------------
@@ -383,9 +383,9 @@ static bool thumb_resolve(const char *key, char *path, int cap) {
 static char s_fallback_root[DL_PATH_MAX] = "";
 static const char *s_roots[2] = {
 #if BUILD_FOR_RPCS3
-    "/dev_hdd0/game/JELP30001/USRDIR/jellyfin_offline",
+    "/dev_hdd0/game/JELP30001/USRDIR/jellop_offline",
 #else
-    "/dev_hdd0/jellyfin_offline",
+    "/dev_hdd0/jellop_offline",
 #endif
     s_fallback_root,
 };
@@ -399,8 +399,8 @@ static const char *s_roots[2] = {
 // While no drive takes writes the HDD store is shown (its downloads still play) and new downloads
 // are refused with the reason (dl_location_note), rather than quietly going to the HDD.
 //
-// The drive: the NTFS or FAT32 one that already holds a store (jellyfin_offline/layout.txt), else
-// the first such drive.  The store is "usbN:/jellyfin_offline".
+// The drive: the NTFS or FAT32 one that already holds a store (jellop_offline/layout.txt), else
+// the first such drive.  The store is "usbN:/jellop_offline".
 
 static const char *k_loc_file = "jellyfin_dlloc.txt";
 static int  s_loc_usb = -1;                    // the setting; -1 = not read yet
@@ -457,7 +457,7 @@ static void choose(char *root, int cap, char *note, int ncap, char *label, int l
         for (int i = 0; i < n; i++) {
             if (d[i].kind != LFS_USB_NTFS && d[i].kind != LFS_USB_FAT) continue;
             char p[64];
-            snprintf(p, sizeof(p), "%s:/jellyfin_offline/layout.txt", d[i].id);
+            snprintf(p, sizeof(p), "%s:/jellop_offline/layout.txt", d[i].id);
             lfs_entry e;
             if (pass == 0 ? lfs_stat(p, &e) : true) { pick = i; break; }   // a drive with a store first
         }
@@ -472,7 +472,7 @@ static void choose(char *root, int cap, char *note, int ncap, char *label, int l
         snprintf(note, (size_t)ncap, "%s: %s", d[pick].label, lfs_drive_why_readonly(top));
         return;
     }
-    snprintf(root, (size_t)cap, "%s:/jellyfin_offline", d[pick].id);
+    snprintf(root, (size_t)cap, "%s:/jellop_offline", d[pick].id);
     snprintf(label, (size_t)lcap, "%s", d[pick].label);
 }
 
@@ -513,7 +513,7 @@ bool dl_service_start(void) {
     if (!s_fs_module) s_fs_module = (sysModuleLoad(SYSMODULE_FS) == 0);
     thumb_set_local_source(thumb_resolve);
     snprintf(s_fallback_root, sizeof(s_fallback_root), "%s",
-             jf_data_path("jellyfin_offline"));
+             jf_data_path("jellop_offline"));
     // Whatever session exists already (a saved login) -- or none, which
     // keeps the queue held until login.
     dl_service_refresh_auth();

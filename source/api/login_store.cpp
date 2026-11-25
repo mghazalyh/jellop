@@ -36,7 +36,7 @@ static struct {
     const char *prefs;  size_t prefs_len;
 } s_op;
 
-static char s_title[]      = "JellyFin [PS]";
+static char s_title[]      = "Jellop";
 static char s_subtitle[SYS_SAVE_MAX_SUBTITLE];
 static char s_detail[SYS_SAVE_MAX_DETAIL];
 static char s_login_name[] = LOGIN_FILE;

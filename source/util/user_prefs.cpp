@@ -22,7 +22,7 @@
 
 #define USER_SUBDIR "jf_user"
 
-extern void jf_login_resave(void);     // api_auth.cpp: the sign-in and these, saved
+extern bool jf_login_resave(void);     // api_auth.cpp: the sign-in and these, saved
 
 static bool s_active = false;
 
@@ -154,9 +154,10 @@ static void save_if_changed(void) {
     const size_t have = user_prefs_bundle(s_bundle, sizeof s_bundle);
     const uint32_t h = bundle_hash(s_bundle, have);
     if (s_have_hash && h == s_saved_hash) return;
-    jf_login_resave();
-    s_saved_hash = h;
-    s_have_hash  = true;
+    if (jf_login_resave()) {
+        s_saved_hash = h;
+        s_have_hash = true;
+    } else plog("user prefs: permanent save not confirmed");
 }
 
 static sys_ppu_thread_t s_save_tid = 0;

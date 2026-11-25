@@ -66,6 +66,7 @@
 #include "live_watch.h"   // Live TV: when to ask for a fresh stream
 #include "surf_clock.h"
 #include "surf_state.h"
+#include "live_exclusions.h"
 #include "live_evidence.h"
 #include "http.h"         // a channel PlaybackInfo may take longer than 24 s
 
@@ -644,21 +645,13 @@ static char s_live_last_id[40] = "";
 // Channels the server could not open this run (an M3U entry whose source
 // refuses us, e.g. HTTP 403 from the CDN).  Channel changes step over them;
 // they are not saved, so a channel that comes back is tried again next run.
-#define LIVE_DEAD_MAX 32
-static char s_live_dead[LIVE_DEAD_MAX][40];
-static int  s_live_dead_n = 0;
-static const int LIVE_SKIP_MAX = 3;      // dead channels stepped over per press
-
+static LiveExclusions s_live_dead={};
+static const int LIVE_SKIP_MAX = 3; // bounded attempts per transition
 static bool live_is_dead(const char *id) {
-    for (int i = 0; i < s_live_dead_n; i++)
-        if (strcmp(s_live_dead[i], id) == 0) return true;
-    return false;
+    return live_excluded(&s_live_dead,id,timing_get_us());
 }
-
 static void live_mark_dead(const char *id) {
-    if (!id[0] || live_is_dead(id)) return;
-    const int slot = s_live_dead_n < LIVE_DEAD_MAX ? s_live_dead_n++ : LIVE_DEAD_MAX - 1;
-    snprintf(s_live_dead[slot], sizeof s_live_dead[slot], "%s", id);
+    live_exclude(&s_live_dead,id,timing_get_us());
 }
 
 // The next channel from `cur` in direction `dir` that is not known dead, or
@@ -894,7 +887,7 @@ void show_player_run(const JFItem *item, u32 resume_secs,
     static JFItem s_live_item;
     const bool live = !local && strcmp(item->type, "TvChannel") == 0;
     if (live) {
-        s_live_dead_n=0; // local failed-open exclusions belong to this playback only
+        memset(&s_live_dead,0,sizeof s_live_dead); // temporary local exclusions
         s_live_item = *item;
         item = &s_live_item;
         snprintf(s_live_last_id, sizeof s_live_last_id, "%s", item->id);
@@ -1203,7 +1196,7 @@ void show_player_run(const JFItem *item, u32 resume_secs,
         player_startup_abort();
         vdec_close();
         thumb_cache_init();
-        show_error(TR("VDEC init failed."), "See /dev_hdd0/tmp/player_log.txt");
+        show_error(TR("VDEC init failed."), "See /dev_hdd0/tmp/jellop/player_log.txt");
         ui_restore_rsx_state();
         return;
     }
@@ -1318,7 +1311,7 @@ void show_player_run(const JFItem *item, u32 resume_secs,
         thumb_cache_init();
         ui_restore_rsx_state();
         show_error(TR("Not enough memory to start playback."),
-                   "See /dev_hdd0/tmp/player_log.txt");
+                   "See /dev_hdd0/tmp/jellop/player_log.txt");
         return;
     }
     {
@@ -1429,7 +1422,7 @@ void show_player_run(const JFItem *item, u32 resume_secs,
         if (running) {   // not when the console is quitting the app
             ui_restore_rsx_state();
             show_error(TR("Playback ended before the video started."),
-                       "See /dev_hdd0/tmp/player_log.txt");
+                       "See /dev_hdd0/tmp/jellop/player_log.txt");
         }
         return;
     }
@@ -1652,8 +1645,10 @@ void show_player_run(const JFItem *item, u32 resume_secs,
             to=livetv_step_channel(to,count,direction);
             if(to<0||to==at)break;
             JFChannel ch;
-            if(xmb_livetv_get(to,&ch)&&!live_is_dead(ch.id)&&
-               !surf_seen(&surf_checkpoint,surf_rank(&surf_pool,ch.id)))return to;
+            if(xmb_livetv_get(to,&ch)&&!live_is_dead(ch.id)){
+                const int rank=surf_rank(&surf_pool,ch.id);
+                if(rank>=0&&!surf_seen(&surf_checkpoint,rank))return to;
+            }
         }
         return -1;
     };
@@ -1868,13 +1863,13 @@ void show_player_run(const JFItem *item, u32 resume_secs,
                 ps.paused || g_sys_overlay || hud_menu_open() || live_target>=0);
             if (surf_clock.mode==SURF_RUNNING && surf_confirmed &&
                 now_lv-surf_saved_us>=SURF_CHECKPOINT_US)save_surf(now_lv);
-            if (due && act==HUD_ACTION_NONE && live_target<0) {
+            if (due && surf_confirmed && act==HUD_ACTION_NONE && live_target<0) {
                 const int at=xmb_livetv_index_of(item->id);
                 surf_mark(&surf_checkpoint,surf_rank(&surf_pool,item->id));
                 int to=surf_pick(at,+1);
                 if(to<0){
-                    surf_next_cycle(&surf_checkpoint);
-                    to=surf_pick(at,+1);
+                    if(surf_rollover_if_alternative(&surf_checkpoint,live_step_alive(at,xmb_livetv_count(),+1)>=0))
+                        to=surf_pick(at,+1);
                 }
                 save_surf(now_lv);
                 JFChannel ch;

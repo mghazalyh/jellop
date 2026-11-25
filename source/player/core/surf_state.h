@@ -70,6 +70,10 @@ static inline void surf_next_cycle(SurfCheckpoint *c) {
     memset(c->visited,0,sizeof c->visited);
     c->cycle=c->cycle==0xffffffffu?1:c->cycle+1;
 }
+static inline bool surf_rollover_if_alternative(SurfCheckpoint *c,bool alternative) {
+    if(!alternative)return false;
+    surf_next_cycle(c);return true;
+}
 static inline SurfCheckpoint surf_restore(const SurfStore *s,uint64_t scope,const SurfPool *p,const char *id,unsigned dwell=60) {
     if(dwell<15||dwell>600)dwell=60;
     SurfCheckpoint c={};c.scope=scope;c.pool=p->fingerprint;c.cycle=1;c.remaining=dwell;

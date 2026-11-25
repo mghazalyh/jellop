@@ -518,10 +518,16 @@ void prefs_load(void) {
 void prefs_save(void) {
     char buf[2048];
     if (lp_format(&s_prefs, buf, sizeof buf) < 0) return;
-    FILE *f = fopen(jf_data_path(PREFS_FILE), "w");
-    if (!f) return;
-    fputs(buf, f);
-    fclose(f);
+    char path[192],tmp[208];
+    snprintf(path,sizeof path,"%s",jf_data_path(PREFS_FILE));
+    snprintf(tmp,sizeof tmp,"%s.tmp",path);
+    FILE *f=fopen(tmp,"wb");
+    if(!f)return;
+    const size_t n=strlen(buf);
+    bool ok=fwrite(buf,1,n,f)==n&&fflush(f)==0;
+    if(fclose(f)!=0)ok=false;
+    if(ok&&rename(tmp,path)==0)return;
+    remove(tmp);plog("livetv: preferences write failed");
 }
 
 // The key of the page on screen while the tab is paged (and not searching), else 0.

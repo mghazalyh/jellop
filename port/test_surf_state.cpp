@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include "../source/player/core/surf_state.h"
 #include "../source/player/core/live_buffer.h"
+#include "../source/player/core/live_exclusions.h"
 static_assert(sizeof(SurfStore)<800,"checkpoint RAM budget");
 static_assert(sizeof(SurfPool)<3100,"pool RAM budget");
 int main(){
@@ -27,5 +28,16 @@ int main(){
     assert(live_ring_budget(10*1024*1024,true)==LIVE_RING_MIN);
     assert(live_ring_budget(12*1024*1024,true)==4*1024*1024);
     assert(live_ring_budget(32*1024*1024,true)==LIVE_RING_BYTES_MAX);
-    puts("Scope isolation, stable cycle, LRU checkpoints, corrupt-state rejection and memory budgets passed");
+    c=surf_restore(&s,10,&p,"a");
+    surf_mark(&c,surf_rank(&p,"a"));
+    assert(!surf_rollover_if_alternative(&c,false)&&c.cycle==1&&surf_seen(&c,surf_rank(&p,"a")));
+    assert(surf_rollover_if_alternative(&c,true)&&c.cycle==2&&!surf_seen(&c,surf_rank(&p,"a")));
+    LiveExclusions ex={};live_exclude(&ex,"a",10);
+    assert(live_excluded(&ex,"a",10+LIVE_EXCLUSION_US-1));
+    assert(!live_excluded(&ex,"a",10+LIVE_EXCLUSION_US));
+    live_exclude(&ex,"a",20);
+    for(unsigned n=0;n<32;n++){char id[16];snprintf(id,sizeof id,"channel-%u",n);live_exclude(&ex,id,100+n);}
+    assert(!live_excluded(&ex,"a",200));
+    assert(live_excluded(&ex,"channel-0",200)&&live_excluded(&ex,"channel-31",200));
+    puts("Scope isolation, stable cycle, LRU checkpoints, corrupt-state rejection, retry cooldown and memory budgets passed");
 }

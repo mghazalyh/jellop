@@ -1,9 +1,13 @@
 #pragma once
 
+// Separate writable scratch data from the upstream title.
+#define JELLOP_TMP_DIR "/dev_hdd0/tmp/jellop"
+void jf_paths_init(void);
+
 // Absolute path for an app-data file (login, device id, settings).
 //
 // Location is target-specific (see jf_paths.cpp): on the real PS3 it is
-// /dev_hdd0/tmp — the one place writable at runtime, since the installed game
+// /dev_hdd0/tmp/jellop — a subdirectory of the writable scratch area, since the installed game
 // USRDIR is not reliably writable while the title runs, so the login silently
 // failed to save there.  Under RPCS3 it stays in the game USRDIR (writable and
 // persistent there), unchanged.

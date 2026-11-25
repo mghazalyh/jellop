@@ -1,6 +1,7 @@
 // Client log upload -- see log_upload.h.
 
 #include "log_upload.h"
+#include "jf_paths.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -44,15 +45,15 @@ static void upload_thread(void *arg) {
         s_status = -1; s_state = LOGUP_FAILED;
     } else {
         int n = snprintf(buf, 1024,
-            "=== JellyFin [PS] %s client log ===\n"
+            "=== Jellop %s client log ===\n"
             "display=%ux%u\n\n", APP_VERSION,
             (unsigned)display_width, (unsigned)display_height);
         // The previous run first: a crash or power-off ends it, and that is
         // the run worth reading when this one starts clean.
-        int pn = read_tail("/dev_hdd0/tmp/player_log.prev.txt", buf + n, LOGUP_PREV);
+        int pn = read_tail(JELLOP_TMP_DIR "/player_log.prev.txt", buf + n, LOGUP_PREV);
         n += pn;
         if (pn > 0) n += snprintf(buf + n, 64, "\n=== this run ===\n");
-        int cur = read_tail("/dev_hdd0/tmp/player_log.txt", buf + n, LOGUP_MAX);
+        int cur = read_tail(JELLOP_TMP_DIR "/player_log.txt", buf + n, LOGUP_MAX);
         n += cur;
         if (cur <= 0 && pn <= 0) {
             s_state = LOGUP_NOLOG;

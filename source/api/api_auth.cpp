@@ -258,10 +258,9 @@ bool jf_login_borrowed(void) { return s_borrowed; }
 
 // The save written again as it stands: the sign-in (a borrower's own, signed
 // out) and the PS3 user's settings with it.  user_prefs_save() calls this.
-void jf_login_resave(void) {
-    if (!s_loaded || !s_store_ok) return;
-    if (s_borrowed) store_write(false, s_own_device);
-    else            store_write(g_token[0] != 0, s_device_id);
+bool jf_login_resave(void) {
+    if (!s_loaded || !s_store_ok) return false;
+    return s_borrowed ? store_write(false, s_own_device) : store_write(g_token[0] != 0, s_device_id);
 }
 
 bool jf_login_shared(void) {
@@ -619,15 +618,6 @@ static int password_login(void) {
     snprintf(url,  sizeof(url),  "%s/Users/AuthenticateByName", g_server);
     if (!jf_build_login_body(g_username, password, body, sizeof(body))) return 0;
 
-    {
-        FILE *dbg = fopen("/dev_hdd0/tmp/jf_debug.txt", "w");
-        if (dbg) {
-            fprintf(dbg, "URL: %s\nBody(%d): <credentials redacted>\n",
-                    url, (int)strlen(body));
-            fclose(dbg);
-        }
-    }
-
     int status = http_request(1, url, body, NULL, responseBuffer, RESPONSE_SIZE);
 
     if (status == 200) {
@@ -636,14 +626,7 @@ static int password_login(void) {
         if (g_token[0]) { save_config(); return 1; }
     }
 
-    {
-        FILE *dbg = fopen("/dev_hdd0/tmp/jf_debug.txt", "a");
-        if (dbg) {
-            fprintf(dbg, "Status: %d\nResponse(%d): %s\n",
-                    status, (int)strlen(responseBuffer), responseBuffer);
-            fclose(dbg);
-        }
-    }
+    { char diag[64]; snprintf(diag,sizeof diag,"login: failed HTTP %d",status); plog(diag); }
 
     const char *why;
     if      (status == 401) why = TR("Wrong username or password.");
@@ -651,9 +634,8 @@ static int password_login(void) {
     else if (status == 400) why = TR("Bad request - check your credentials.");
     else if (status ==  -1) why = TR("Could not reach the server.");
     else                    why = TR("The server returned an unexpected error.");
-    char line[96], snippet[64];
+    char line[96];
     snprintf(line, sizeof(line), "%s  (status %d)", why, status);
-    snprintf(snippet, sizeof(snippet), "%.60s", responseBuffer);
 
     // Drawn every frame while it waits (see jellyfin_session_expired).
     init_btns();
@@ -665,7 +647,6 @@ static int password_login(void) {
         drawHeader();
         drawTTF(40, 96, TR("Couldn't sign in"), 22, XMB_TEXT, true);
         drawTTF(40, 136, line, 16, XMB_TEXT_DIM);
-        if (snippet[0]) drawTTF(40, 164, snippet, 13, XMB_TEXT_FAINT);
         static const Hint h[] = {{'X',TRN("Try again")}};
         draw_hints_bar(h, 1);
         flip();

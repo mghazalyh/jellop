@@ -5,9 +5,7 @@
 
 #include <stdio.h>
 #include <string.h>
-#if BUILD_FOR_RPCS3
-#include <sys/file.h>   // sysLv2FsMkdir (inline LV2 syscall, no PRX module needed)
-#endif
+#include <sys/file.h>   // sysLv2FsMkdir
 
 // Where config / device id / settings live.  This differs by target:
 //
@@ -22,7 +20,7 @@
 #if BUILD_FOR_RPCS3
 #define JF_DATA_DIR "/dev_hdd0/game/JELP30001/USRDIR"
 #else
-#define JF_DATA_DIR "/dev_hdd0/tmp"
+#define JF_DATA_DIR JELLOP_TMP_DIR
 #endif
 
 // Each PS3 user's own: how the app looks and behaves for them, and what they
@@ -52,6 +50,14 @@ const char *jf_user_file(int i)      { return i >= 0 && i < N_USER_FILES ? k_use
 static char s_user_dir[128];
 static bool s_user_on = false;
 
+void jf_paths_init(void) {
+    sysLv2FsMkdir(JELLOP_TMP_DIR, 0755);
+#if BUILD_FOR_RPCS3
+    sysLv2FsMkdir("/dev_hdd0/game/JELP30001", 0755);
+    sysLv2FsMkdir(JF_DATA_DIR, 0755);
+#endif
+}
+
 void jf_data_set_user_dir(const char *subdir) {
     s_user_on = subdir && subdir[0];
     if (s_user_on) snprintf(s_user_dir, sizeof s_user_dir, "%s/%s", JF_DATA_DIR, subdir);
@@ -75,16 +81,7 @@ const char *jf_data_path(const char *name) {
 }
 
 const char *jf_shared_data_path(const char *name) {
-#if BUILD_FOR_RPCS3
-    static bool made = false;
-    if (!made) {
-        // Create the tree if missing (bare .self boot under RPCS3).
-        sysLv2FsMkdir("/dev_hdd0/game/JELP30001", 0755);
-        sysLv2FsMkdir(JF_DATA_DIR, 0755);
-        made = true;
-    }
-#endif
-    static char buf[128];
+    static char buf[192];
     snprintf(buf, sizeof(buf), "%s/%s", JF_DATA_DIR, name);
     return buf;
 }

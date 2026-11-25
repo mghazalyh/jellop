@@ -1,4 +1,5 @@
 #include "user_prefs.h"
+#include "jf_paths.h"
 #include "audio_bitstream.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -98,7 +99,7 @@ static void sysutil_exit_callback(u64 status, u64 param, void *usrdata) {
 // free main memory, so a hang shows how much headroom it happened with.
 void crash_log(const char *msg) {
     static bool started = false;
-    FILE *f = fopen("/dev_hdd0/tmp/crash_log.txt", started ? "a" : "w");
+    FILE *f = fopen(JELLOP_TMP_DIR "/crash_log.txt", started ? "a" : "w");
     if (f) {
         fprintf(f, "%s [free=%uKB]\n", msg, meminfo_avail_kb());
         fclose(f);
@@ -112,9 +113,10 @@ void crash_log(const char *msg) {
 
 int main(int argc, const char *argv[]) {
     (void)argc; (void)argv;
+    jf_paths_init();
 
     {
-        FILE *f = fopen("/dev_hdd0/tmp/launch_test.txt", "w");
+        FILE *f = fopen(JELLOP_TMP_DIR "/launch_test.txt", "w");
         if (f) { fprintf(f, "main() reached\n"); fclose(f); }
     }
 

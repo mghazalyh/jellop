@@ -17,3 +17,7 @@ The optional `server/bridge.py` converts the existing gateway's HLS to bounded M
 Optional declarative runtime configuration is supported by the bridge. It is bounded by hard-coded native and server limits; no script engine is introduced. See `server/config.example.json` and the bridge documentation for revision-based rollback.
 
 Native channel switching explicitly closes the previous bridge transcode using the existing Jellyfin stop endpoint. Session and token checks prevent unrelated sessions from stopping it.
+
+## Storage and retry isolation
+
+Jellop uses its own `/dev_hdd0/tmp/jellop` scratch directory, separate PS3 savedata identity, and `jellop_offline` media directories. It does not import the original application's temporary login or preferences. Login errors are logged as status codes only. Surf keeps the sole healthy channel instead of manufacturing cycle rollovers. Failed opens receive a five-minute local cooldown, never an automatic gateway ban. The existing native save-data fallback may lose scratch state after a reboot; permanent save failures are logged rather than claimed as successful.

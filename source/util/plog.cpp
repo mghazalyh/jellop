@@ -1,5 +1,5 @@
 // Async log — ring buffer drained by a dedicated thread.
-// Written to /dev_hdd0/tmp/player_log.txt.
+// Written to /dev_hdd0/tmp/jellop/player_log.txt.
 
 #include <stdio.h>
 #include <string.h>
@@ -81,9 +81,9 @@ void plog_start(void) {
     if (s_plog_running) return;
     // Keep the last run's log: a session that ended in a black screen or a
     // hard power-off is exactly the one worth reading, and "w" wiped it.
-    remove("/dev_hdd0/tmp/player_log.prev.txt");
-    rename("/dev_hdd0/tmp/player_log.txt", "/dev_hdd0/tmp/player_log.prev.txt");
-    s_plog_file    = fopen("/dev_hdd0/tmp/player_log.txt", "w");
+    remove(JELLOP_TMP_DIR "/player_log.prev.txt");
+    rename(JELLOP_TMP_DIR "/player_log.txt", JELLOP_TMP_DIR "/player_log.prev.txt");
+    s_plog_file    = fopen(JELLOP_TMP_DIR "/player_log.txt", "w");
     s_plog_running = true;
     sysThreadCreate(&s_plog_tid, plog_thread_fn, NULL,
                     1200, 32 * 1024, 0, "jf_plog");

@@ -2,6 +2,7 @@
 // Entire translation unit is empty on real hardware.
 
 #include "slog.h"
+#include "jf_paths.h"
 
 #if BUILD_FOR_RPCS3
 
@@ -12,8 +13,8 @@
 
 // STATE lines go to their own file on the PS3 VFS.  Under the RPCS3 flatpak
 // this maps to a host path the test harness tails directly:
-//   ~/.var/app/net.rpcs3.RPCS3/config/rpcs3/dev_hdd0/tmp/jf_state.log
-#define SLOG_PATH "/dev_hdd0/tmp/jf_state.log"
+//   ~/.var/app/net.rpcs3.RPCS3/config/rpcs3/dev_hdd0/tmp/jellop/jf_state.log
+#define SLOG_PATH JELLOP_TMP_DIR "/jf_state.log"
 
 // Open-write-close per line, exactly like crash_log() (main.cpp): a kept-open
 // FILE*+fflush can lose its tail on a hard GPU/decoder hang, and that tail is
