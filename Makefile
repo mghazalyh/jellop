@@ -26,7 +26,7 @@ DATA        := data
 INCLUDES    := source/audio source/audio/dcahd \
                source/audio/mlp/ff source/audio/mlp/ff/libavcodec \
                source/gfx source/net source/api \
-               source/player source/player/hud source/player/gpu source/player/stream \
+               source/player source/player/core source/player/hud source/player/gpu source/player/stream \
                source/ui source/ui/render source/ui/fonts \
                source/util source/cache source/video source/music source/spu \
                source/offline source/local third_party/mohasi_fs source/i18n

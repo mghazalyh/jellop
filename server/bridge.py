@@ -240,7 +240,7 @@ class Bridge:
                 decoded=sample["DecodedMs"]-last["DecodedMs"]
                 if dt<2:return
                 if (dt<=25 and not sample["paused"] and not last["paused"] and
-                    sample["Stalls"]==last["Stalls"] and 0<frames<=dt*65 and
+                    sample["Stalls"]==last["Stalls"] and dt*8<=frames<=dt*65 and
                     dt*500<=decoded<=dt*1200):
                     row["run_seconds"]+=min(dt,decoded/1000)
                 else:row["run_seconds"]=0.0

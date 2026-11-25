@@ -549,17 +549,6 @@ void build_pages(int want) {
     s_page = lp_pick_page(keys, n, want ? want : s_prefs.last);
 }
 
-// A channel was played.
-void note_recent(const char *id) {
-    if (!id || !id[0]) return;
-    prefs_load();
-    const int before = s_prefs.n_recent;
-    lp_note_recent(&s_prefs, id);
-    prefs_save();
-    // The first channel watched brings the Recently watched page into the list.
-    if (before == 0 && s_index_ok && s_npages > 0) build_pages(s_pages[s_page].key);
-}
-
 // A finished job, into the display buffers.  Render thread.
 void collect(void) {
     if (s_jstate != J_DONE) return;
