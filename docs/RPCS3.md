@@ -25,3 +25,7 @@ The optional native fixture driver requires an emulator build, a specific
 scratch marker and the exact local fixture server/token. It calls the ordinary
 catalogue and playback paths. It does not test controller input or prove
 physical hardware compatibility.
+
+## Isolated CI smoke
+
+The [separate workflow](../.github/workflows/rpcs3.yml) downloads a pinned RPCS3 binary and Sony firmware onto an ephemeral runner. Firmware is not included in artifacts. Synthetic HLS uses two channels and 15-second Surf dwell. A pass requires a two-channel catalogue, actual native frame progress for both channels, an automatic transition, and increasing frame counters after the transition. The GUI run uses Mesa software OpenGL under Xvfb; it is not a physical performance benchmark. The workflow runs on pushes and manual dispatch only.

@@ -1,0 +1,80 @@
+name: Jellop RPCS3
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: jellop-rpcs3-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  emulator-package:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fetch pinned SDK
+        run: |
+          curl --fail --location --retry 2 --max-time 180 -o tools/ps3dev-linux-X64.tar.gz https://github.com/ps3dev/ps3dev/releases/download/nightly-2026-07-26/ps3dev-linux-X64.tar.gz
+          echo 'dcbed747e094c6a382dae5b0aacc322a1d4390d9f2849a7d750a96ea398ee8ab  tools/ps3dev-linux-X64.tar.gz' | sha256sum -c -
+          docker build -f tools/Dockerfile.ps3 -t jellop-build:2026-07-26 tools
+      - name: Cross-compile separate emulator package
+        run: |
+          docker run --rm -v "$PWD:/build" jellop-build:2026-07-26 make -j2 BUILD_FOR_RPCS3=1 pkg
+          docker run --rm -v "$PWD:/build:ro" jellop-build:2026-07-26 python3 tools/verify_pkg.py
+          mkdir -p dist
+          cp JellyFin-PS3.gnpdrm.pkg dist/Jellop-RPCS3.pkg
+          (cd dist && sha256sum Jellop-RPCS3.pkg > Jellop-RPCS3.pkg.sha256)
+          git rev-parse HEAD > dist/source-revision.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Jellop-RPCS3-candidate
+          path: dist/
+          if-no-files-found: error
+          retention-days: 14
+  emulator-smoke:
+    needs: emulator-package
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      XDG_CONFIG_HOME: ${{ runner.temp }}/jellop-rpcs3/config
+      XDG_CACHE_HOME: ${{ runner.temp }}/jellop-rpcs3/cache
+      XDG_DATA_HOME: ${{ runner.temp }}/jellop-rpcs3/data
+      LIBGL_ALWAYS_SOFTWARE: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: Jellop-RPCS3-candidate
+          path: dist
+      - name: Install graphical runtime dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb xauth libgl1-mesa-dri libglx-mesa0 libegl1 libxkbcommon-x11-0 libxcb-cursor0 libxcb-xinerama0 libxcb-icccm4 libxcb-keysyms1 libxcb-render-util0 libasound2t64 libpulse0 ffmpeg imagemagick
+      - name: Download pinned RPCS3 and official firmware
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP"
+          curl --fail --location --retry 2 --max-time 180 -o rpcs3.AppImage https://github.com/RPCS3/rpcs3-binaries-linux/releases/download/build-0ca5eb0efe50ec4e8aa07892ab86d57842246eb4/rpcs3-v0.0.43-20663-0ca5eb0e_linux64.AppImage
+          echo 'efba6a20ab8d33edec07c68f46e1f22c43ba95e2bf301c4489bcd6f4c4359bf1  rpcs3.AppImage' | sha256sum -c -
+          chmod +x rpcs3.AppImage
+          ./rpcs3.AppImage --appimage-extract > /dev/null
+          curl --fail --location --retry 2 --max-time 180 -o PS3UPDAT.PUP https://dus01.ps3.update.playstation.net/update/ps3/image/us/2026_0318_a2b60b6ac1d2e49e230144345616927c/PS3UPDAT.PUP
+          sha256sum PS3UPDAT.PUP
+      - name: Install firmware and candidate in isolated RPCS3 profile
+        run: |
+          mkdir -p "$XDG_CONFIG_HOME/rpcs3" "$XDG_CACHE_HOME" "$XDG_DATA_HOME" smoke
+          printf 'Video:\n  Renderer: Null\nAudio:\n  Renderer: Null\n' > "$XDG_CONFIG_HOME/rpcs3/config.yml"
+          timeout 420 "$RUNNER_TEMP/squashfs-root/AppRun" --headless --installfw "$RUNNER_TEMP/PS3UPDAT.PUP" --installpkg "$PWD/dist/Jellop-RPCS3.pkg" > smoke/install.log 2>&1
+          test -f "$XDG_CONFIG_HOME/rpcs3/dev_hdd0/game/JELP30001/USRDIR/EBOOT.BIN"
+      - name: Actual graphical playback and Surf transition
+        run: |
+          xvfb-run -a -s '-screen 0 1280x720x24' python3 tools/rpcs3_smoke.py --emulator "$RUNNER_TEMP/squashfs-root/AppRun" --root "$XDG_CONFIG_HOME/rpcs3" --output smoke
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: Jellop-RPCS3-smoke-diagnostics
+          path: smoke/
+          if-no-files-found: warn
+          retention-days: 7
