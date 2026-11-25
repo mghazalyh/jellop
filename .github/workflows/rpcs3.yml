@@ -38,12 +38,14 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     env:
-      XDG_CONFIG_HOME: ${{ runner.temp }}/jellop-rpcs3/config
-      XDG_CACHE_HOME: ${{ runner.temp }}/jellop-rpcs3/cache
-      XDG_DATA_HOME: ${{ runner.temp }}/jellop-rpcs3/data
       LIBGL_ALWAYS_SOFTWARE: '1'
     steps:
       - uses: actions/checkout@v4
+      - name: Prepare isolated emulator profile
+        run: |
+          echo "XDG_CONFIG_HOME=$RUNNER_TEMP/jellop-rpcs3/config" >> "$GITHUB_ENV"
+          echo "XDG_CACHE_HOME=$RUNNER_TEMP/jellop-rpcs3/cache" >> "$GITHUB_ENV"
+          echo "XDG_DATA_HOME=$RUNNER_TEMP/jellop-rpcs3/data" >> "$GITHUB_ENV"
       - uses: actions/download-artifact@v4
         with:
           name: Jellop-RPCS3-candidate
