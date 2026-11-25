@@ -32,17 +32,30 @@ def main():
     (tmp/"jellop_smoke.txt").write_text("fixture-surf-v1\n")
     state=tmp/"jf_state.log"
     config=out/"rpcs3-config.yml"
-    config.write_text("Video:\n  Renderer: OpenGL\n  Write Color Buffers: true\n  Read Color Buffers: true\nAudio:\n  Renderer: Null\nNet:\n  Internet enabled: Connected\n  Bind address: 0.0.0.0\n")
+    config.write_text("Video:\n  Renderer: OpenGL\n  Write Color Buffers: true\n  Read Color Buffers: true\nAudio:\n  Renderer: Null\n  Music Handler: Null\nInput/Output:\n  Camera: Null\nNet:\n  Internet enabled: Connected\n  Bind address: 0.0.0.0\n")
     env=dict(os.environ,LIBGL_ALWAYS_SOFTWARE="1",QT_X11_NO_MITSHM="1")
     proc=None
+    cache=Path(os.environ.get("XDG_CACHE_HOME",str(root)))/"rpcs3"
+    rpcs3_log=cache/"RPCS3.log"
     with fixture() as b, (out/"emulator-stdout.log").open("wb") as log:
         try:
             proc=subprocess.Popen([args.emulator,"--no-gui","--config",str(config),str(boot)],
                 stdout=log,stderr=subprocess.STDOUT,env=env,start_new_session=True)
             deadline=time.monotonic()+300
+            last_state=""
             while time.monotonic()<deadline:
+                if rpcs3_log.exists():
+                    with rpcs3_log.open("rb") as raw:
+                        raw.seek(max(0,rpcs3_log.stat().st_size-262144))
+                        recent=raw.read().decode(errors="replace")
+                    if ("Emulation has been frozen!" in recent or
+                        "Thread terminated due to fatal error" in recent):
+                        raise RuntimeError("RPCS3 reported fatal emulation freeze; see RPCS3.log")
                 if proc.poll() is not None:raise RuntimeError("RPCS3 exited before smoke completion: "+str(proc.returncode))
                 lines=state.read_text(errors="replace") if state.exists() else ""
+                if lines!=last_state:
+                    print(lines[len(last_state):] if lines.startswith(last_state) else lines[-4000:],flush=True)
+                    last_state=lines
                 channels=re.findall(r"JELLOP_LIVE_CONFIRMED channel=([a-f0-9]{32}) frame=(\d+)",lines)
                 confirmed={cid for cid,n in channels if int(n)>0}
                 if "JELLOP_SMOKE_CATALOGUE count=2" in lines and "JELLOP_SURF_DUE " in lines and set(CHANNELS)<=confirmed:
@@ -60,8 +73,10 @@ def main():
                 try:proc.wait(timeout=10)
                 except subprocess.TimeoutExpired:
                     os.killpg(proc.pid,signal.SIGKILL);proc.wait()
-            cache=Path(os.environ.get("XDG_CACHE_HOME",str(root)))/"rpcs3"
-            for src in (state,tmp/"crash_log.txt",tmp/"player_log.txt",cache/"RPCS3.log"):
+            if not (out/"screen.png").exists():
+                try:subprocess.run(["import","-window","root",str(out/"failure-screen.png")],timeout=15,check=False)
+                except (OSError,subprocess.TimeoutExpired):pass
+            for src in (state,tmp/"crash_log.txt",tmp/"player_log.txt",rpcs3_log):
                 if src.is_file():
                     with src.open("rb") as f:
                         f.seek(max(0,src.stat().st_size-2*1024*1024))
