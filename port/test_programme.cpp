@@ -22,6 +22,7 @@ int main() {
     assert(!strcmp(c.now_title,"Movie (2020)"));
     assert(c.now_start_ticks == 0 && c.now_end_ticks == 0);
     assert(livetv_current_title_valid(&c,jf_ticks_from_unix(1795620001)));
+    assert(!livetv_current_title_valid(&c,jf_ticks_from_unix(1795619900)));
     assert(!livetv_current_title_valid(&c,jf_ticks_from_unix(1795620150)));
     const char *guide = R"JSON({"Items":[{"Id":"abc","CurrentProgram":{"Name":"Scheduled: Film (1992)","JealousfinProgramme":{"source":"corroborated-external-schedule","observedAt":1795620000}}}]})JSON";
     c = parse(guide);
@@ -36,5 +37,11 @@ int main() {
     assert(livetv_current_title_valid(&c,jf_ticks_from_iso8601("2026-11-25T23:59:59Z")));
     assert(!livetv_current_title_valid(&c,jf_ticks_from_iso8601("2026-11-26T00:00:00Z")));
     assert(!livetv_current_title_valid(NULL,1));
+    const char *programmes=R"JSON({"Items":[{"ChannelId":"a","Name":"Film (2020)","JealousfinProgramme":{"source":"provider-catalogue","observedAt":1795620000}},{"ChannelId":"b","Name":"Wrong channel","JealousfinProgramme":{"source":"provider-catalogue","observedAt":1795620000}}]})JSON";
+    JFProgram rows[2]={};
+    assert(livetv_parse_programs(programmes,strlen(programmes),rows,2,0,0)==2);
+    assert(livetv_current_programme_index(rows,2,"a",jf_ticks_from_unix(1795620001))==0);
+    assert(livetv_current_programme_index(rows,2,"a",jf_ticks_from_unix(1795620150))==-1);
+    assert(livetv_current_programme_index(rows,2,"c",jf_ticks_from_unix(1795620001))==-1);
     puts("Jellop current-only programme and live ring regression checks passed");
 }

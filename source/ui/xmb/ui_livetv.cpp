@@ -64,7 +64,7 @@ const uint64_t T_3H   = 180 * T_MIN;
 
 const int      MAX_CH      = LIVETV_MAX_CHANNELS;
 const int      MAX_INDEX   = 6000;                  // channel numbers kept (24 KB)
-const int      PAGE_MIN    = 200;                   // at most this many: one numbered category
+const int      PAGE_MIN    = 384;                   // at most this many: one numbered category
 const int      GENRE_MIN   = 3;                     // a genre with fewer channels gets no page
 const int      MAX_PAGES   = 48;                    // categories, genres and the viewer's two
 const int      MAX_PG      = 400;                   // programmes kept: ~130 KB
@@ -1068,6 +1068,14 @@ void xmb_livetv_on_enter(void) {
 void xmb_livetv_stop(void) {
     s_run = false;
     if (s_have_tid) { u64 r; sysThreadJoin(s_tid, &r); s_have_tid = false; }
+}
+
+void xmb_livetv_record_played(const char *id) {
+    if (!id || !id[0]) return;
+    prefs_load();
+    if (lp_recent_rank(&s_prefs,id)==0) return;
+    lp_note_recent(&s_prefs,id);
+    prefs_save();
 }
 
 int  xmb_livetv_count(void) { return s_n; }

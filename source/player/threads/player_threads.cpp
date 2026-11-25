@@ -511,13 +511,15 @@ static void live_guide_fetch(const char *channel, u32 gen) {
     const int n = jf_fetch_programs(ids, 1, now, now + LIVE_GUIDE_AHEAD_TICKS,
                                     p, LIVE_GUIDE_PROGRAMMES);
     if (n > 0 && running && g_prog.gen == gen && g_prog.playing && !g_prog.guide_ready) {
-        const int on   = livetv_programme_at(p, n, now);
+        const int on   = livetv_current_programme_index(p, n, channel, now);
         const int next = livetv_programme_after(p, n, now);
         snprintf(g_prog.guide_channel, sizeof g_prog.guide_channel, "%s", channel);
         snprintf(g_prog.guide_now,  sizeof g_prog.guide_now,  "%s", on   >= 0 ? p[on].name   : "");
         snprintf(g_prog.guide_next, sizeof g_prog.guide_next, "%s", next >= 0 ? p[next].name : "");
         g_prog.guide_now_start = on >= 0 ? p[on].start_ticks : 0;
         g_prog.guide_now_end   = on >= 0 ? p[on].end_ticks   : 0;
+        g_prog.guide_now_observed = on >= 0 ? p[on].evidence_observed_ticks : 0;
+        g_prog.guide_now_expiry = on >= 0 ? p[on].evidence_expiry_ticks : 0;
         __sync_synchronize();
         g_prog.guide_ready = true;
     }

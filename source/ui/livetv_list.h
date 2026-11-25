@@ -6,3 +6,6 @@
 int  xmb_livetv_count(void);
 bool xmb_livetv_get(int index, JFChannel *out);
 int  xmb_livetv_index_of(const char *channel_id);
+
+// Record a decoded channel without rebuilding the active page.
+void xmb_livetv_record_played(const char *channel_id);

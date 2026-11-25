@@ -249,6 +249,28 @@ static int each_object(const char *p, const char *end, int max, void *out,
     return n;
 }
 
+// Keep actual guide dates distinct from evidence freshness.
+static void programme_evidence(const char *o, const char *e, char *title,
+                               uint64_t *observed_ticks, uint64_t *expiry_ticks) {
+    const char *ev = find_top_value(o, e, "JealousfinProgramme");
+    if (!ev) return;
+    const char *ee = object_end(ev, e);
+    char source[48] = "";
+    if (ee) str_field(ev, ee, "source", source, sizeof source);
+    const char *v = ee ? find_top_value(ev, ee, "observedAt") : NULL;
+    const long long observed = v ? read_json_int(v, ee, 0) : 0;
+    const int ttl = !strcmp(source, "provider-catalogue") ? 150 :
+                    !strcmp(source, "corroborated-external-schedule") ? 1800 : 0;
+    if (!ttl || observed < 946684800LL || observed > 4102444800LL) {
+        title[0] = '\0'; return;
+    }
+    *observed_ticks = jf_ticks_from_unix((uint64_t)observed);
+    *expiry_ticks = jf_ticks_from_unix((uint64_t)observed + ttl);
+    const char prefix[] = "Scheduled: ";
+    if (!strncmp(title, prefix, sizeof prefix - 1))
+        memmove(title, title + sizeof prefix - 1, strlen(title + sizeof prefix - 1) + 1);
+}
+
 static void channel_fn(const char *o, const char *e, void *dst) {
     JFChannel *c = (JFChannel *)dst;
     memset(c, 0, sizeof *c);
@@ -273,27 +295,8 @@ static void channel_fn(const char *o, const char *e, void *dst) {
             str_field(cp, ce, "Name", c->now_title, sizeof c->now_title);
             c->now_start_ticks = time_field(cp, ce, "StartDate");
             c->now_end_ticks   = time_field(cp, ce, "EndDate");
-            const char *ev = find_top_value(cp, ce, "JealousfinProgramme");
-            if (ev && *ev == '{') {
-                const char *ee = object_end(ev, ce);
-                char source[48] = "";
-                if (ee) str_field(ev, ee, "source", source, sizeof source);
-                const char *v = ee ? find_top_value(ev, ee, "observedAt") : NULL;
-                long long observed = v ? read_json_int(v, ee, 0) : 0;
-                int ttl = !strcmp(source, "provider-catalogue") ? 150 :
-                          !strcmp(source, "corroborated-external-schedule") ? 1800 : 0;
-                if (ttl && observed >= 946684800LL && observed <= 4102444800LL) {
-                    c->now_evidence_expiry_ticks = jf_ticks_from_unix((uint64_t)observed + ttl);
-                } else {
-                    // Present but invalid evidence cannot be treated as a
-                    // conventional, indefinitely cached programme.
-                    c->now_title[0] = '\0';
-                }
-                const char prefix[] = "Scheduled: ";
-                if (!strncmp(c->now_title, prefix, sizeof prefix - 1))
-                    memmove(c->now_title, c->now_title + sizeof prefix - 1,
-                            strlen(c->now_title + sizeof prefix - 1) + 1);
-            }
+            programme_evidence(cp, ce, c->now_title, &c->now_evidence_observed_ticks,
+                               &c->now_evidence_expiry_ticks);
         }
     }
 }
@@ -307,6 +310,7 @@ static void program_fn(const char *o, const char *e, void *dst) {
     str_field(o, e, "EpisodeTitle", p->episode_title, sizeof p->episode_title);
     p->start_ticks = time_field(o, e, "StartDate");
     p->end_ticks   = time_field(o, e, "EndDate");
+    programme_evidence(o, e, p->name, &p->evidence_observed_ticks, &p->evidence_expiry_ticks);
     p->is_movie    = bool_field(o, e, "IsMovie");
     p->is_series   = bool_field(o, e, "IsSeries");
     p->is_news     = bool_field(o, e, "IsNews");
@@ -333,12 +337,35 @@ static int parse_items(const char *json, int len, void *out, int max, size_t str
     return n;
 }
 
+static bool current_valid(const char *title, uint64_t start, uint64_t end,
+                          uint64_t observed, uint64_t expiry, uint64_t now) {
+    if (!title || !title[0] || !now) return false;
+    if (expiry && (!observed || now >= expiry ||
+        (observed > now && observed-now > 300000000ULL))) return false;
+    if (start || end) return start && end && start <= now && now < end;
+    return expiry != 0;
+}
 bool livetv_current_title_valid(const JFChannel *c, uint64_t now) {
-    if (!c || !c->now_title[0] || !now) return false;
-    if (c->now_evidence_expiry_ticks && now >= c->now_evidence_expiry_ticks) return false;
-    if (c->now_start_ticks || c->now_end_ticks)
-        return c->now_start_ticks <= now && now < c->now_end_ticks;
-    return c->now_evidence_expiry_ticks != 0;
+    return c && current_valid(c->now_title,c->now_start_ticks,c->now_end_ticks,
+                              c->now_evidence_observed_ticks,c->now_evidence_expiry_ticks,now);
+}
+bool livetv_programme_title_valid(const JFProgram *p, uint64_t now) {
+    return p && current_valid(p->name,p->start_ticks,p->end_ticks,
+                              p->evidence_observed_ticks,p->evidence_expiry_ticks,now);
+}
+int livetv_current_programme_index(const JFProgram *p, int n, const char *channel, uint64_t now) {
+    if (!p || !channel || n <= 0) return -1;
+    int timed=-1, undated=-1;
+    bool ambiguous=false;
+    for (int i=0;i<n;i++) {
+        if (strcmp(p[i].channel_id,channel) || !livetv_programme_title_valid(p+i,now)) continue;
+        if (!p[i].start_ticks && !p[i].end_ticks) {
+            if (undated>=0 && strcmp(p[undated].name,p[i].name)) ambiguous=true;
+            else undated=i;
+        } else if (timed<0 || p[i].start_ticks>p[timed].start_ticks) timed=i;
+    }
+    if (ambiguous) return -1;
+    return undated>=0 ? undated : timed;
 }
 
 int livetv_parse_channels(const char *json, int len, JFChannel *out, int max,

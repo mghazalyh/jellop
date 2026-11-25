@@ -22,6 +22,7 @@ typedef struct {
     char     now_title[128];
     uint64_t now_start_ticks, now_end_ticks;
     uint64_t now_evidence_expiry_ticks; // 0 for ordinary Jellyfin EPG
+    uint64_t now_evidence_observed_ticks;
 } JFChannel;
 
 typedef struct {
@@ -30,6 +31,7 @@ typedef struct {
     char name[128];
     char episode_title[96];
     uint64_t start_ticks, end_ticks;
+    uint64_t evidence_observed_ticks, evidence_expiry_ticks;
     bool is_movie, is_series, is_news, is_sports, is_kids, is_live, is_premiere;
 } JFProgram;
 
@@ -61,6 +63,8 @@ void livetv_format_hm(uint64_t ticks, int utc_offset_secs, char *out, int cap);
 // number after those with one), then by name.  Stable.
 void livetv_sort_channels(JFChannel *c, int n);
 bool livetv_current_title_valid(const JFChannel *c, uint64_t now);
+bool livetv_programme_title_valid(const JFProgram *p, uint64_t now);
+int livetv_current_programme_index(const JFProgram *p, int n, const char *channel, uint64_t now);
 
 // Elapsed fraction of the current programme at `now`, in permille, clamped to
 // [0, 1000].  -1 when there is no programme (no times, or end <= start).

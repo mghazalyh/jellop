@@ -64,6 +64,7 @@
 #include "livetv_list.h"  // Live TV: the channel list, for channel up/down
 #include "live_buffer.h"
 #include "live_watch.h"   // Live TV: when to ask for a fresh stream
+#include "surf_clock.h"
 #include "http.h"         // a channel PlaybackInfo may take longer than 24 s
 
 extern void crash_log(const char *msg);
@@ -690,11 +691,12 @@ static void live_programme(const JFChannel *ch, int utc, char *title, size_t tca
     title[0] = times[0] = '\0';
     *permille = -1;
     const uint64_t now = jf_now_ticks();
-    if (!ch->now_title[0] || ch->now_end_ticks <= now) return;
+    if (!livetv_current_title_valid(ch, now)) return;
+    snprintf(title, tcap, "%s", ch->now_title);
+    if (!ch->now_start_ticks || !ch->now_end_ticks) return;
     char a[16], b[16];
     livetv_format_hm(ch->now_start_ticks, utc, a, sizeof a);
     livetv_format_hm(ch->now_end_ticks, utc, b, sizeof b);
-    snprintf(title, tcap, "%s", ch->now_title);
     snprintf(times, mcap, "%s - %s", a, b);
     *permille = livetv_progress_permille(now, ch->now_start_ticks, ch->now_end_ticks);
 }
@@ -736,6 +738,8 @@ static void live_take_guide(JFChannel *ch) {
         snprintf(ch->now_title, sizeof ch->now_title, "%s", g_prog.guide_now);
         ch->now_start_ticks = g_prog.guide_now_start;
         ch->now_end_ticks   = g_prog.guide_now_end;
+        ch->now_evidence_observed_ticks = g_prog.guide_now_observed;
+        ch->now_evidence_expiry_ticks = g_prog.guide_now_expiry;
         snprintf(s_live_next, sizeof s_live_next, "%s", g_prog.guide_next);
     }
     __sync_synchronize();
@@ -747,7 +751,8 @@ static void live_banner(const JFChannel *ch, int utc) {
     int pm;
     live_channel_label(ch, label, sizeof label);
     live_programme(ch, utc, title, sizeof title, times, sizeof times, &pm);
-    if (title[0]) snprintf(sub, sizeof sub, "%s  \xC2\xB7  %s", title, times);
+    if (title[0] && times[0]) snprintf(sub, sizeof sub, "%s  \xC2\xB7  %s", title, times);
+    else if (title[0]) snprintf(sub, sizeof sub, "%s", title);
     else          sub[0] = '\0';
     hud_set_banner(label, sub, timing_get_us() + LIVE_BANNER_US);
 }
@@ -1583,6 +1588,9 @@ void show_player_run(const JFItem *item, u32 resume_secs,
     u64       live_hud_us   = 0;
     LiveWatch live_w;
     live_watch_init(&live_w, timing_get_us());
+    SurfClock surf_clock;
+    surf_clock_init(&surf_clock, 60);
+    char surf_recorded[40] = "";
 
     // ---- Main (display) loop ----
     while (running && ps.playing && !s_vdec_error) {
@@ -1760,6 +1768,29 @@ void show_player_run(const JFItem *item, u32 resume_secs,
         bool        live_changed = false;
         if (live) {
             const u64 now_lv = timing_get_us();
+            if (BTN_PRESSED(l3) && !hud_menu_open() && !g_sys_overlay) {
+                surf_clock_toggle(&surf_clock,now_lv,ps.frame_count);
+                hud_set_banner(live_ch.name,
+                    surf_clock.mode==SURF_RUNNING ? "Surf running" : "Surf paused",
+                    now_lv+LIVE_BANNER_US);
+            }
+            if (ps.frame_count>0 && strcmp(surf_recorded,item->id)) {
+                snprintf(surf_recorded,sizeof surf_recorded,"%s",item->id);
+                xmb_livetv_record_played(item->id);
+            }
+            const bool due = surf_clock_step(&surf_clock,now_lv,ps.frame_count,
+                ps.paused || g_sys_overlay || hud_menu_open() || live_target>=0);
+            if (due && act==HUD_ACTION_NONE && live_target<0) {
+                const int at=xmb_livetv_index_of(item->id);
+                const int to=live_step_alive(at,xmb_livetv_count(),+1);
+                JFChannel ch;
+                if (to>=0 && xmb_livetv_get(to,&ch)) {
+                    live_target=to;live_dir=+1;live_press_us=now_lv;
+                    live_banner(&ch,live_utc);
+                } else {
+                    surf_clock_new_channel(&surf_clock,now_lv,ps.frame_count);
+                }
+            }
             if (act == HUD_ACTION_CHANNEL_NEXT || act == HUD_ACTION_CHANNEL_PREV) {
                 const int n = xmb_livetv_count();
                 JFChannel ch;
@@ -1859,6 +1890,8 @@ void show_player_run(const JFItem *item, u32 resume_secs,
                 snprintf(g_prog.item, sizeof g_prog.item, "%s", item->id);
                 snprintf(g_prog.live_id, sizeof g_prog.live_id, "%s", ps.source.live_stream_id);
                 live_watch_opened(&live_w, timing_get_us());
+                if (live_changed) surf_clock_new_channel(&surf_clock,timing_get_us(),ps.frame_count);
+                else surf_clock_rebase(&surf_clock,timing_get_us(),ps.frame_count);
                 if (seek_ok && live_changed) { live_hud_channel(&live_ch, live_utc); live_banner(&live_ch, live_utc); }
             }
             g_prog.base_us   = ps.play_base_us;
@@ -1924,6 +1957,14 @@ void show_player_run(const JFItem *item, u32 resume_secs,
                 live_hud_us = now_lv;
                 live_take_guide(&live_ch);
                 live_hud_channel(&live_ch, live_utc);
+                if (surf_clock.mode!=SURF_OFF) {
+                    char title[96],times[24],countdown[24];int pm;
+                    live_programme(&live_ch,live_utc,title,sizeof title,times,sizeof times,&pm);
+                    const unsigned sec=surf_clock_seconds(&surf_clock);
+                    snprintf(countdown,sizeof countdown,"%s %02u:%02u",
+                             surf_clock.mode==SURF_PAUSED ? "Paused" : "Surf",sec/60,sec%60);
+                    hud_set_live_programme(title,countdown,-1);
+                }
             }
         }
         // A picture staged, or none coming soon: a stream without one still has its sound.

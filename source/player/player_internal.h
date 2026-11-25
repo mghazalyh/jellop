@@ -70,6 +70,7 @@ struct ProgressShared {
     char          guide_channel[40];
     char          guide_now[128];
     u64           guide_now_start, guide_now_end;
+    u64           guide_now_observed, guide_now_expiry;
     char          guide_next[96];
 };
 extern ProgressShared g_prog;
