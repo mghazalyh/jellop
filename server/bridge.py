@@ -310,8 +310,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
                         self.end_headers()
                         started=True
                     self.wfile.write(chunk)
-        except (BrokenPipeError,ConnectionResetError,TimeoutError):
+        except (BrokenPipeError,ConnectionResetError):
             pass
+        except TimeoutError:
+            if not started:raise Failure(504,"transcode-startup-timeout") from None
         except OSError:
             if not started:raise Failure(502,"transcode-unavailable") from None
         finally:

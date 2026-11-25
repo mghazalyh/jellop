@@ -714,7 +714,7 @@ static void live_hud_next(const char *cur_id) {
     else                                                  hud_set_live_next("");
 }
 
-static void live_hud_channel(const JFChannel *ch, int utc) {
+static void live_hud_channel(const JFChannel *ch, int utc, const SurfClock *surf = NULL) {
     char label[128], title[96], times[24], line[96];
     int pm;
     live_channel_label(ch, label, sizeof label);
@@ -726,7 +726,12 @@ static void live_hud_channel(const JFChannel *ch, int utc) {
     else
         snprintf(line, sizeof line, "%s", title);
     hud_set_title(label);
-    hud_set_live_programme(line, times, pm);
+    if (surf && surf->mode!=SURF_OFF) {
+        const unsigned sec=surf_clock_seconds(surf);
+        snprintf(times,sizeof times,"%s %02u:%02u",
+                 surf->mode==SURF_PAUSED ? "Paused" : "Surf",sec/60,sec%60);
+        hud_set_live_programme(title,times,-1);
+    } else hud_set_live_programme(line,times,pm);
     live_hud_next(ch->id);
 }
 
@@ -1591,6 +1596,7 @@ void show_player_run(const JFItem *item, u32 resume_secs,
     SurfClock surf_clock;
     surf_clock_init(&surf_clock, 60);
     char surf_recorded[40] = "";
+    int surf_last_frame = ps.frame_count;
 
     // ---- Main (display) loop ----
     while (running && ps.playing && !s_vdec_error) {
@@ -1774,10 +1780,11 @@ void show_player_run(const JFItem *item, u32 resume_secs,
                     surf_clock.mode==SURF_RUNNING ? "Surf running" : "Surf paused",
                     now_lv+LIVE_BANNER_US);
             }
-            if (ps.frame_count>0 && strcmp(surf_recorded,item->id)) {
+            if (ps.frame_count>0 && ps.frame_count!=surf_last_frame && strcmp(surf_recorded,item->id)) {
                 snprintf(surf_recorded,sizeof surf_recorded,"%s",item->id);
                 xmb_livetv_record_played(item->id);
             }
+            surf_last_frame=ps.frame_count;
             const bool due = surf_clock_step(&surf_clock,now_lv,ps.frame_count,
                 ps.paused || g_sys_overlay || hud_menu_open() || live_target>=0);
             if (due && act==HUD_ACTION_NONE && live_target<0) {
@@ -1892,6 +1899,7 @@ void show_player_run(const JFItem *item, u32 resume_secs,
                 live_watch_opened(&live_w, timing_get_us());
                 if (live_changed) surf_clock_new_channel(&surf_clock,timing_get_us(),ps.frame_count);
                 else surf_clock_rebase(&surf_clock,timing_get_us(),ps.frame_count);
+                surf_last_frame=ps.frame_count;
                 if (seek_ok && live_changed) { live_hud_channel(&live_ch, live_utc); live_banner(&live_ch, live_utc); }
             }
             g_prog.base_us   = ps.play_base_us;
@@ -1956,15 +1964,7 @@ void show_player_run(const JFItem *item, u32 resume_secs,
             if (now_lv - live_hud_us >= 1000000ULL) {
                 live_hud_us = now_lv;
                 live_take_guide(&live_ch);
-                live_hud_channel(&live_ch, live_utc);
-                if (surf_clock.mode!=SURF_OFF) {
-                    char title[96],times[24],countdown[24];int pm;
-                    live_programme(&live_ch,live_utc,title,sizeof title,times,sizeof times,&pm);
-                    const unsigned sec=surf_clock_seconds(&surf_clock);
-                    snprintf(countdown,sizeof countdown,"%s %02u:%02u",
-                             surf_clock.mode==SURF_PAUSED ? "Paused" : "Surf",sec/60,sec%60);
-                    hud_set_live_programme(title,countdown,-1);
-                }
+                live_hud_channel(&live_ch, live_utc,&surf_clock);
             }
         }
         // A picture staged, or none coming soon: a stream without one still has its sound.
