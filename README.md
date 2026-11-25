@@ -15,3 +15,5 @@ During Live TV playback, press L3 to start or pause/resume the opt-in 60-second 
 The optional `server/bridge.py` converts the existing gateway's HLS to bounded MPEG-TS. It is not deployed. See [bridge documentation](server/README.md).
 
 Optional declarative runtime configuration is supported by the bridge. It is bounded by hard-coded native and server limits; no script engine is introduced. See `server/config.example.json` and the bridge documentation for revision-based rollback.
+
+Native channel switching explicitly closes the previous bridge transcode using the existing Jellyfin stop endpoint. Session and token checks prevent unrelated sessions from stopping it.

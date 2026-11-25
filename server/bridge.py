@@ -10,6 +10,7 @@ import json
 import os
 import re
 import selectors
+import socket
 import subprocess
 import threading
 import time
@@ -129,6 +130,36 @@ def ffmpeg_args(binary,source,q,config=None):
             "-c:a","libmp3lame","-ac","2","-ar","48000","-b:a","128k",
             "-f","mpegts","-mpegts_flags","+resend_headers","-flush_packets","1","pipe:1"]
 
+class ActiveStream:
+    """One slot, owned by exactly one authenticated session."""
+    def __init__(self,token,cid,requested,sock):
+        self.token,self.cid,self.requested=token,cid,requested
+        self.sid=""
+        self.sock=sock
+        self.proc=None
+        self.lock=threading.Lock()
+        self.cancelled=threading.Event()
+        self.done=threading.Event()
+
+    def attach(self,proc):
+        with self.lock:
+            self.proc=proc
+            if self.cancelled.is_set():
+                try:proc.terminate()
+                except OSError:pass
+                return False
+            return True
+
+    def cancel(self):
+        self.cancelled.set()
+        with self.lock:
+            if self.proc is not None:
+                try:self.proc.terminate()
+                except OSError:pass
+            try:self.sock.shutdown(socket.SHUT_RDWR)
+            except OSError:pass
+
+
 class Bridge:
     def __init__(self,upstream,binary="ffmpeg",config_path=None):
         self.base=origin(upstream)
@@ -139,6 +170,7 @@ class Bridge:
         self.catalogues=OrderedDict()
         self.sessions=OrderedDict()
         self.evidence=OrderedDict()
+        self.active=None
         self.transcode=threading.BoundedSemaphore(1)
 
     def upstream(self,path,token="",method="GET",body=None):
@@ -202,6 +234,32 @@ class Bridge:
             self.sessions[(token,cid,sid)]=(time.monotonic(),source)
             self.sessions.move_to_end((token,cid,sid))
             while len(self.sessions)>16:self.sessions.popitem(last=False)
+
+    def claim_stream(self,token,cid,requested,sock):
+        if not self.transcode.acquire(blocking=False):
+            raise Failure(503,"transcode-capacity")
+        control=ActiveStream(token,cid,requested,sock)
+        with self.lock:self.active=control
+        return control
+
+    def release_stream(self,control):
+        with self.lock:
+            if self.active is control:self.active=None
+        self.transcode.release()
+        control.done.set()
+
+    def stop_stream(self,token,sid):
+        if not re.fullmatch(ID,sid):raise Failure(400,"invalid-session")
+        with self.lock:
+            for key in list(self.sessions):
+                if key[0]==token and key[2]==sid:self.sessions.pop(key)
+            current=self.active
+            if not current or current.token!=token or sid not in (current.sid,current.requested):
+                return {}
+        current.cancel()
+        if not current.done.wait(timeout=5):
+            raise Failure(503,"transcode-stop-pending")
+        return {}
 
     def stream_started(self,token,cid,sid):
         with self.lock:
@@ -268,6 +326,8 @@ class Bridge:
         if path=="/Users/AuthenticateByName" and method=="POST":
             return self.upstream(path,method=method,body=body)
         token=client_token(headers,q)
+        if path=="/Videos/ActiveEncodings" and method=="DELETE":
+            return self.stop_stream(token,first(q,"PlaySessionId"))
         if path=="/Jellop/Diagnostics" and method=="GET":return self.diagnostics(token)
         if path=="/Jellop/Config" and method=="GET":
             self.catalogue(token,fresh=True)
@@ -359,19 +419,22 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def serve_stream(self,cid,q):
         b=self.server.bridge
         token=client_token(self.headers,q)
-        if not b.transcode.acquire(blocking=False):
-            raise Failure(503,"transcode-capacity")
+        control=b.claim_stream(token,cid,first(q,"PlaySessionId"),self.connection)
         proc=None;started=False;sid="";reason="startup-error"
         try:
-            sid,source=b.resolve(token,cid,session=first(q,"PlaySessionId"))
+            sid,source=b.resolve(token,cid,session=control.requested)
+            with b.lock:control.sid=sid
+            if control.cancelled.is_set():return
             proc=subprocess.Popen(ffmpeg_args(b.binary,source,q,b.config.snapshot()),stdin=subprocess.DEVNULL,
                                   stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,bufsize=0)
+            if not control.attach(proc):return
             with selectors.DefaultSelector() as sel:
                 sel.register(proc.stdout,selectors.EVENT_READ)
-                while True:
+                while not control.cancelled.is_set():
                     if not sel.select(timeout=25 if not started else 15):
                         if not started:raise Failure(504,"transcode-startup-timeout")
                         reason="transcode-output-timeout";break
+                    if control.cancelled.is_set():break
                     chunk=os.read(proc.stdout.fileno(),STREAM_CHUNK)
                     if not chunk:
                         if not started:raise Failure(502,"transcode-no-output")
@@ -396,8 +459,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         finally:
             try:stop_process(proc)
             finally:
-                if started:b.stream_finished(token,cid,sid,reason)
-                b.transcode.release()
+                if started:b.stream_finished(token,cid,sid,"client-stop" if control.cancelled.is_set() else reason)
+                b.release_stream(control)
     def handle_api(self):
         try:
             p=url.urlsplit(self.path)
