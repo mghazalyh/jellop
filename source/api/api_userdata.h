@@ -10,3 +10,14 @@ bool jf_set_favourite(const char *item_id, bool favourite);
 
 // Mark an item played (true) or unplayed (false).  True on a 2xx reply.
 bool jf_set_played(const char *item_id, bool played);
+
+// One bounded on-demand mutation; render thread submits and takes results.
+// Captures the URL/token at submission, so changing accounts cannot redirect it.
+struct JFFavouriteResult {
+    char id[64];
+    bool favourite;
+    int status;
+};
+bool jf_favourite_async_start(const char *item_id, bool favourite);
+bool jf_favourite_async_pending(void);
+bool jf_favourite_async_take(JFFavouriteResult *out);

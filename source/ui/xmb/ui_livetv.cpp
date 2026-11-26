@@ -653,6 +653,9 @@ void tick(void) {
 
     collect();
     if (!s_run || !s_ch) return;
+    // Wait until an older catalogue reply has been collected before applying
+    // the result, then request a fresh server-authoritative page.
+    if (s_jstate == J_IDLE) xmb_livetv_favourite_result();
     const u64 now = timing_get_us();
 
     // The window follows the clock until the guide is being read.
@@ -1153,6 +1156,22 @@ int xmb_livetv_index_of(const char *id) {
     return -1;
 }
 
+int xmb_livetv_favourite_result(void) {
+    JFFavouriteResult result;
+    if (!jf_favourite_async_take(&result)) return 0;
+    if (result.status < 200 || result.status >= 300) {
+        ui_sfx_play(SFX_CANCEL);
+        return -1;
+    }
+    const int at = xmb_livetv_index_of(result.id);
+    if (at >= 0) s_ch[at].favourite = result.favourite;
+    // Never reorder or shrink the page during playback: Surf uses its exact
+    // membership. The normal list refresh applies the new order on return.
+    s_last_refresh_us = 0;
+    ui_sfx_play(SFX_OPTION);
+    return 1;
+}
+
 bool xmb_livetv_at_top(void) { return classic_grid() ? s_sel < live_grid().cols : s_sel <= 0; }
 bool xmb_livetv_modal(void)  { return s_guide || s_in_details || s_search_on; }
 
@@ -1198,6 +1217,10 @@ bool xmb_input_livetv(void) {
         }
         if (BTN_PRESSED(cross)) { play_channel(s_sel); return false; }
         if (BTN_PRESSED(triangle)) {
+            if (jf_favourite_async_pending()) {
+                ui_sfx_play(SFX_CANCEL);
+                return false;
+            }
             // Optimistic: star it now, put it back if the server refuses, and
             // keep the selection on the same channel as the list reorders.
             const bool want = !s_ch[s_sel].favourite;
