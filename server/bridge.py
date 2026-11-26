@@ -376,6 +376,16 @@ class Bridge:
         token=client_token(headers,q)
         if path=="/Videos/ActiveEncodings" and method=="DELETE":
             return self.stop_stream(token,first(q,"PlaySessionId"))
+        if path=="/Jellop/Bootstrap" and method=="GET":
+            # Authenticated Live TV startup; the gateway remains authoritative.
+            # Do not open a stream or mutate policy as part of discovery.
+            rows=self.catalogue(token,fresh=True)
+            return {"JellopBootstrapVersion":1,"Mode":"livetv",
+                    "PolicyAuthoritative":self.require_policy,
+                    "EligibleChannelCount":len(rows),
+                    "Items":[{"Id":LIVE_VIEW,"Name":"Live TV","Type":"CollectionFolder",
+                              "CollectionType":"livetv","IsFolder":True}],
+                    "TotalRecordCount":1}
         if path=="/Jellop/ChannelPolicy" and method=="GET":
             if not self.require_policy:raise Failure(503,"gateway-policy-unavailable")
             rows=self.catalogue(token,fresh=True,include_excluded=True)

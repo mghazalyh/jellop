@@ -595,6 +595,7 @@ void ui_run_xmb(void) {
     // No server answered, here or at a new address: say so once the menu is
     // up, rather than leaving an empty bar to explain itself.
     bool server_prompt = !xmb_have_server_tabs() && xmb_server_unreachable() && !g_auth_expired;
+    bool incompatible_prompt = !xmb_have_server_tabs() && xmb_server_incompatible() && !g_auth_expired;
 
     if (!g_tabs[g_active_tab].enabled) {
         for (int t = 0; t < XMB_TAB_COUNT; t++) {
@@ -606,6 +607,7 @@ void ui_run_xmb(void) {
 
     crash_log("13.4 init_btns");
     init_btns();
+    if (xmb_is_jellop_bridge()) xmb_switch_tab(XMB_TAB_LIB0);
     crash_log("13.5 loop enter");
     wd_start();
 
@@ -655,23 +657,35 @@ void ui_run_xmb(void) {
                     s_lib_next_us = 1;
                 }
             }
+            if (incompatible_prompt && !boot_anim_active() && !xmb_update_popup_active()) {
+                incompatible_prompt = false;
+                if (xmb_server_incompatible_prompt()) xmb_switch_tab(XMB_TAB_SETTINGS);
+                else xmb_switch_tab(XMB_TAB_LIB0); // Media, no unsupported Home fetch
+                init_btns();
+            }
             wd_stage("13.5f tabs_poll");
             const int got = xmb_detect_tabs_poll();
             if (got >= 0) {
                 if (got == 1 && xmb_have_server_tabs()) {
                     plog("xmb: libraries recovered");
+                    if (xmb_is_jellop_bridge() && g_active_tab == XMB_TAB_HOME)
+                        xmb_switch_tab(XMB_TAB_LIB0);
                     if (!g_tabs[g_active_tab].enabled) {
                         for (int t = 0; t < XMB_TAB_COUNT; t++)
                             if (g_tabs[t].enabled) { g_active_tab = t; break; }
                     }
                 }
-                if (s_lib_gap_us < 60000000ULL) s_lib_gap_us *= 2;
+                if (got == 0 && xmb_server_incompatible()) incompatible_prompt = true;
+                if (s_lib_gap_us < 60000000ULL) {
+                    s_lib_gap_us *= 2;
+                    if (s_lib_gap_us > 60000000ULL) s_lib_gap_us = 60000000ULL;
+                }
                 s_lib_next_us = timing_get_us() + s_lib_gap_us;
             }
             if (xmb_have_server_tabs()) {
                 s_lib_next_us = 0;
                 s_lib_gap_us  = 5000000ULL;
-            } else {
+            } else if (xmb_bootstrap_retryable() || server_prompt) {
                 u64 now = timing_get_us();
                 if (s_lib_next_us == 0) {
                     s_lib_next_us = now + s_lib_gap_us;
@@ -680,7 +694,10 @@ void ui_run_xmb(void) {
                     if (xmb_detect_tabs_start()) {
                         s_lib_next_us = ~0ULL;   // re-armed when the reply lands
                     } else {
-                        if (s_lib_gap_us < 60000000ULL) s_lib_gap_us *= 2;
+                        if (s_lib_gap_us < 60000000ULL) {
+                            s_lib_gap_us *= 2;
+                            if (s_lib_gap_us > 60000000ULL) s_lib_gap_us = 60000000ULL;
+                        }
                         s_lib_next_us = now + s_lib_gap_us;
                     }
                 }

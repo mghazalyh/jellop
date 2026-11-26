@@ -43,6 +43,10 @@ int  xmb_detect_tabs_poll(void);
 bool xmb_have_server_tabs(void);
 // The last library request got no answer at all (as opposed to an error).
 bool xmb_server_unreachable(void);
+bool xmb_server_incompatible(void);
+bool xmb_bootstrap_retryable(void);
+bool xmb_is_jellop_bridge(void);
+bool xmb_server_incompatible_prompt(void);
 void xmb_fetch_tab_items(int tab);
 int  xmb_fetch_seasons(const char *series_id, XMBItem *arr, int max,
                        int start_index, int *out_total);

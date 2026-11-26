@@ -13,6 +13,7 @@
 #include "wol_net.h"
 #include "plog.h"
 #include "views_json.h"
+#include "bootstrap_retry.h"
 #include "../../build_config.h"   // SHOW_PLAYLISTS_TAB
 
 // -------------------------------------------------------
@@ -52,8 +53,12 @@ static void add_media_tab(int next) {
 // The last Views request's HTTP status: below 0 means nothing answered at
 // all (as opposed to a server that answered with an error).
 static int s_detect_status = 0;
+static bool s_jellop_bootstrap = false;
 
 bool xmb_server_unreachable(void) { return s_detect_status < 0; }
+bool xmb_server_incompatible(void) { return jf_bootstrap_fallback(s_detect_status); }
+bool xmb_bootstrap_retryable(void) { return jf_bootstrap_retryable(s_detect_status); }
+bool xmb_is_jellop_bridge(void) { return s_jellop_bootstrap; }
 
 // The saved server is answering at a new address (server_discovery.h): use
 // it from now on, and next launch too.
@@ -68,8 +73,9 @@ static void adopt_server(const char *addr) {
 // Fill the library slots from one /Users/{id}/Views reply.  Returns false only
 // when the request or the parse failed outright — a reply that parses to
 // zero libraries is a real answer, not a miss, so it does not retry.
-static bool detect_tabs_parse(int status, const char *buf) {
+static bool detect_tabs_parse(int status, const char *buf, bool bridge) {
     s_detect_status = status;
+    s_jellop_bootstrap = false;
     for (int t = XMB_TAB_LIB0; t < XMB_TAB_COUNT; t++)
         memset(&g_tabs[t], 0, sizeof(g_tabs[t]));
     int next = XMB_TAB_LIB0;
@@ -82,7 +88,7 @@ static bool detect_tabs_parse(int status, const char *buf) {
     if (status != 200) {
         char b[112];
         snprintf(b, sizeof(b),
-                 "detect_tabs: http=%d for /Users/*/Views", status);
+                 "detect_tabs: startup endpoint http=%d", status);
         plog(b);
         add_media_tab(next);
         return false;
@@ -91,6 +97,7 @@ static bool detect_tabs_parse(int status, const char *buf) {
     ViewsCursor cursor;
     if (!views_begin(buf,&cursor)) {
         plog("detect_tabs: invalid top-level Items array");
+        s_detect_status = 502;
         add_media_tab(next);
         return false;
     }
@@ -103,10 +110,19 @@ static bool detect_tabs_parse(int status, const char *buf) {
             for(int t=XMB_TAB_LIB0;t<XMB_TAB_COUNT;t++)memset(&g_tabs[t],0,sizeof(g_tabs[t]));
             add_media_tab(XMB_TAB_LIB0);
             plog("detect_tabs: malformed library row");
+            s_detect_status = 502;
             return false;
         }
         const char *ct=view.collection_type,*id=view.id,*name=view.name;
         if (!id[0]) continue;
+        if (bridge && strcmp(ct, "livetv") != 0) {
+            plog("detect_tabs: invalid Jellop startup view");
+            for (int t = XMB_TAB_LIB0; t < XMB_TAB_COUNT; t++)
+                memset(&g_tabs[t], 0, sizeof(g_tabs[t]));
+            add_media_tab(XMB_TAB_LIB0);
+            s_detect_status = 502;
+            return false;
+        }
 
         if (next >= XMB_TAB_COUNT - 1) {        // (the last slot is the Media tab's)
             // More libraries than the tab bar can hold.  Say so rather than
@@ -171,15 +187,47 @@ static bool detect_tabs_parse(int status, const char *buf) {
     { char b[64];
       snprintf(b, sizeof(b), "detect_tabs: %d libraries", next - XMB_TAB_LIB0);
       plog(b); }
+    if (bridge && (next != XMB_TAB_LIB0 + 1 ||
+                   g_tabs[XMB_TAB_LIB0].kind != TABKIND_LIVETV)) {
+        for (int t = XMB_TAB_LIB0; t < XMB_TAB_COUNT; t++)
+            memset(&g_tabs[t], 0, sizeof(g_tabs[t]));
+        add_media_tab(XMB_TAB_LIB0);
+        s_detect_status = 502;
+        plog("detect_tabs: Jellop requires exactly one Live TV view");
+        return false;
+    }
+    s_jellop_bootstrap = bridge;
     add_media_tab(next);
     return true;
 }
 
-static bool detect_tabs_once(void) {
+// Prefer the thin Live TV contract. Older bridges and ordinary Jellyfin
+// servers can use Views. Never fall back after an authorization failure.
+static int fetch_startup_views(const char *server, const char *userid,
+                               const char *token, char *buf, int cap,
+                               bool *bridge) {
     char url[512];
-    snprintf(url, sizeof(url), "%s/Users/%s/Views", g_server, g_userid);
-    int status = http_request(0, url, NULL, g_token, responseBuffer, RESPONSE_SIZE);
-    return detect_tabs_parse(status, responseBuffer);
+    *bridge = false;
+    int n = snprintf(url, sizeof(url), "%s/Jellop/Bootstrap", server);
+    if (n < 0 || n >= (int)sizeof(url)) return 400;
+    buf[0] = 0;
+    int status = http_request(0, url, NULL, token, buf, cap);
+    if (status == 200) {
+        *bridge = true;
+        return status;
+    }
+    if (!jf_bootstrap_fallback(status)) return status;
+    n = snprintf(url, sizeof(url), "%s/Users/%s/Views", server, userid);
+    if (n < 0 || n >= (int)sizeof(url)) return 400;
+    buf[0] = 0;
+    return http_request(0, url, NULL, token, buf, cap);
+}
+
+static bool detect_tabs_once(void) {
+    bool bridge = false;
+    const int status = fetch_startup_views(g_server, g_userid, g_token,
+                                           responseBuffer, RESPONSE_SIZE, &bridge);
+    return detect_tabs_parse(status, responseBuffer, bridge);
 }
 
 // The XMB's background retry.  The request runs on a worker: an unreachable
@@ -192,7 +240,7 @@ static bool detect_tabs_once(void) {
 namespace {
 const int        BG_BUF = 128 * 1024;   // a Views reply is a few KB per library
 char            *s_bg_buf;
-char             s_bg_url[512];
+bool             s_bg_bridge;
 char             s_bg_server[sizeof g_server];
 char             s_bg_userid[sizeof g_userid];
 char             s_bg_token[sizeof g_token];
@@ -202,12 +250,13 @@ volatile int     s_bg_state;            // 0 idle, 1 running, 2 reply ready
 sys_ppu_thread_t s_bg_tid;
 
 void bg_main(void *) {
-    s_bg_status = http_request(0, s_bg_url, NULL, s_bg_token, s_bg_buf, BG_BUF);
+    s_bg_status = fetch_startup_views(s_bg_server, s_bg_userid, s_bg_token,
+                                      s_bg_buf, BG_BUF, &s_bg_bridge);
     if (s_bg_status < 0) wol_send_saved();       // a sleeping server PC (Settings > Server MAC Address)
     if (s_bg_status < 0 &&
         sd_find_moved(s_bg_server, s_bg_userid, s_bg_token, s_bg_moved, sizeof s_bg_moved)) {
-        snprintf(s_bg_url, sizeof s_bg_url, "%s/Users/%s/Views", s_bg_moved, s_bg_userid);
-        s_bg_status = http_request(0, s_bg_url, NULL, s_bg_token, s_bg_buf, BG_BUF);
+        s_bg_status = fetch_startup_views(s_bg_moved, s_bg_userid, s_bg_token,
+                                          s_bg_buf, BG_BUF, &s_bg_bridge);
     }
     __sync_synchronize();
     s_bg_state = 2;
@@ -221,7 +270,7 @@ bool xmb_detect_tabs_start(void) {
     if (!s_bg_buf) return false;
     s_bg_buf[0] = 0;
     s_bg_moved[0] = 0;
-    snprintf(s_bg_url, sizeof s_bg_url, "%s/Users/%s/Views", g_server, g_userid);
+    s_bg_bridge = false;
     snprintf(s_bg_server, sizeof s_bg_server, "%s", g_server);
     snprintf(s_bg_userid, sizeof s_bg_userid, "%s", g_userid);
     snprintf(s_bg_token, sizeof s_bg_token, "%s", g_token);
@@ -242,9 +291,11 @@ int xmb_detect_tabs_poll(void) {
     __sync_synchronize();
     // A reply for another session (signed out and in again meanwhile) is dropped.
     const bool same = strcmp(s_bg_userid, g_userid) == 0 &&
-                      (strcmp(s_bg_server, g_server) == 0 || s_bg_moved[0]);
+                      strcmp(s_bg_token, g_token) == 0 &&
+                      strcmp(s_bg_server, g_server) == 0;
     if (same && s_bg_moved[0] && s_bg_status == 200) adopt_server(s_bg_moved);
-    const bool ok = same && detect_tabs_parse(s_bg_status, s_bg_buf);
+    const bool ok = same && detect_tabs_parse(s_bg_status, s_bg_buf, s_bg_bridge);
+    memset(s_bg_token, 0, sizeof s_bg_token);
     s_bg_state = 0;
     free(s_bg_buf);
     s_bg_buf = NULL;
@@ -271,6 +322,10 @@ void xmb_detect_tabs(void) {
                 snprintf(b, sizeof(b), "detect_tabs: recovered on try %d", try_n);
                 plog(b);
             }
+            return;
+        }
+        if (!xmb_bootstrap_retryable()) {
+            plog("detect_tabs: permanent startup response; no retry");
             return;
         }
         // Nothing answered.  The server may have moved (a new DHCP address):
@@ -313,7 +368,7 @@ static volatile bool s_prepared = false;
 void xmb_prepare(void) {
     xmb_detect_tabs();
     // The Media tab is always there, so it does not count as an answer.
-    if (xmb_have_server_tabs()) xmb_home_prefetch();
+    if (xmb_have_server_tabs() && !xmb_is_jellop_bridge()) xmb_home_prefetch();
     s_prepared = true;
 }
 

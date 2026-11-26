@@ -44,6 +44,26 @@ class BridgeTests(unittest.TestCase):
         with self.assertRaises(Failure) as err:b.resolve(TOKEN,CID,sid)
         self.assertEqual(err.exception.status,409)
         self.assertEqual(b.upstream.call_count,4)
+    def test_authenticated_livetv_bootstrap(self):
+        b=Bridge("http://gateway",require_policy=False)
+        b.upstream=Mock(return_value={"Items":[{"Id":CID,"Name":"Example"}]})
+        with self.assertRaises(Failure):
+            b.dispatch("GET","/Jellop/Bootstrap",{},{},None)
+        b.upstream.assert_not_called()
+        r=b.dispatch("GET","/Jellop/Bootstrap",{},{"X-Emby-Token":TOKEN},None)
+        self.assertEqual(r["JellopBootstrapVersion"],1)
+        self.assertEqual(r["Mode"],"livetv")
+        self.assertEqual(r["EligibleChannelCount"],1)
+        self.assertFalse(r["PolicyAuthoritative"])
+        self.assertEqual(r["TotalRecordCount"],1)
+        self.assertEqual(r["Items"][0]["CollectionType"],"livetv")
+        self.assertIsNone(b.active)
+        b.upstream.assert_called_once_with("/LiveTv/Channels",TOKEN)
+        b.upstream.side_effect=Failure(401,"upstream-http-401")
+        with self.assertRaises(Failure) as err:
+            b.dispatch("GET","/Jellop/Bootstrap",{},{"X-Emby-Token":TOKEN},None)
+        self.assertEqual(err.exception.status,401)
+
     def test_nonopening_probe_and_api(self):
         b=Bridge("http://gateway",require_policy=False)
         b.upstream=Mock(return_value={"Items":[{"Id":CID,"Name":"Example","CurrentProgram":{"Name":"Movie"}}]})

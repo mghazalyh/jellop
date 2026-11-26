@@ -523,6 +523,12 @@ void xmb_show_offline(void) {
 // the saved login.  Offer to type the address; otherwise the menu keeps
 // retrying (and looking) in the background, and Media still plays.
 // True when the address was changed.
+bool xmb_server_incompatible_prompt(void) {
+    return xmb_dl_confirm(TR("Unsupported server endpoint"),
+        TR("Use the Jellop MPEG-TS bridge URL, not the raw IPTV gateway."),
+        TR("Continue"), TR("Settings"));
+}
+
 bool xmb_server_unreachable_prompt(void) {
     char line[320];
     snprintf(line, sizeof line, TR("No server answered at %s."), g_server);
