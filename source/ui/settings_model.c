@@ -118,6 +118,9 @@ static const setting_row k_rows[] = {
       TRN("Send the diagnostic log to your Jellyfin server (X). It is saved\n"
       "under Dashboard > Logs as upload_PS3_...log: share that file.")},
     // ---- Account & Server
+    { SET_PLAYBACK_INSIGHTS, SEC_ACCOUNT, TRN("Playback Insights"),
+      TRN("Inspect recent decoded playback, channel policy and bridge health.\n"
+      "Read-only snapshot; no automatic channel reinstatement.")},
     { SET_ENGLISH_GATEWAY, SEC_ACCOUNT, TRN("English Gateway"),
       TRN("Enter the URL of your English IPTV gateway.\n"
       "Leave empty to remove the profile.")},

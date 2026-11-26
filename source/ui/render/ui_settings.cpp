@@ -344,6 +344,7 @@ static const UiRow k_ui[] = {
     ACTION(SET_DOWNLOADS,   ICON_COLLECTIONS, v_downloads, a_downloads),
     ACTION(SET_OFFLINE_LIB, ICON_PLAY,        v_offline,   a_offline),
     TOGGLE(SET_SHARE_LOGIN, ICON_LOGOUT,      v_share,     t_share),
+    ACTION(SET_PLAYBACK_INSIGHTS, ICON_BUG, NULL, xmb_show_insights),
     ACTION(SET_ENGLISH_GATEWAY, ICON_ANTENNA, v_english_gateway, a_english_gateway),
     ACTION(SET_MALAY_GATEWAY, ICON_ANTENNA, v_malay_gateway, a_malay_gateway),
     ACTION(SET_CONNECT_ENGLISH, ICON_LOGOUT, v_connect_english, a_connect_english),

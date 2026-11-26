@@ -30,6 +30,11 @@
 #include "dl_library.h"
 #include "dl_ui.h"
 #include "dl_service.h"
+#include "ui_buffering.h"
+#include "jellyfin_api.h"
+#include "http.h"
+#include "jellop_insights.h"
+#include "meminfo.h"
 #include "lfs.h"               // the drives, for the sign-in failure offer
 
 #define DL_WARN_CLR   0x00E8B64CUL   // the rating star's gold: attention, not error red
@@ -183,6 +188,82 @@ void xmb_dl_notice(const char *title, const char *line) {
           draw_hints_bar(h, 1); }
         flip();
     }
+    init_btns();
+}
+
+namespace {
+struct InsightJob { JellopInsights value;int status;bool valid; };
+void fetch_insights(void *arg){
+    InsightJob *job=(InsightJob *)arg;
+    *job=InsightJob{};
+    char url[512],response[2048]={};
+    int n=snprintf(url,sizeof url,"%s/Jellop/Insights",g_server);
+    if(n<0||n>=(int)sizeof url||!g_token[0]){job->status=-1;return;}
+    job->status=http_request(HTTP_GET,url,NULL,g_token,response,sizeof response);
+    job->valid=job->status==200&&jellop_insights_parse(response,&job->value);
+}
+}
+
+void xmb_show_insights(void) {
+    rsxSync();flip();
+    InsightJob job={};
+    bool pending=loading_run(fetch_insights,&job,"Loading Insights",true);
+    init_btns();
+    bool armed=false;
+    while(running&&!g_auth_expired){
+        if(pending)waitflip();
+        pending=false;
+        sysUtilCheckCallback();poll_buttons();
+        if(!armed){if(!btn_cur.cross&&!btn_cur.circle&&!btn_cur.square)armed=true;}
+        else if(BTN_PRESSED(circle)||BTN_PRESSED(cross))break;
+        else if(BTN_PRESSED(square)){
+            pending=loading_run(fetch_insights,&job,"Refreshing Insights",false);
+            init_btns();armed=false;continue;
+        }
+        frame_begin();
+        draw_title("Playback Insights","Read-only observations from this gateway and account","",XMB_TEXT_DIM);
+        const int x=XMB_ITEM_PAD,y0=XMB_OY+UIS_H(94);
+        const int width=(int)display_width-x*2;
+        const int pitch=UIS_H(35);
+        char line[160];
+        int row=0;
+        if(!job.valid){
+            if(job.status==404)snprintf(line,sizeof line,"Insights unavailable: gateway does not expose this endpoint.");
+            else if(job.status==200)snprintf(line,sizeof line,"Insights unavailable: invalid or unsupported response.");
+            else snprintf(line,sizeof line,"Insights unavailable: request failed (%d).",job.status);
+            clip_text(x,y0+row++*pitch,line,UIS_TF(18),DL_WARN_CLR,width,true);
+            clip_text(x,y0+row++*pitch,"Check the configured gateway and bridge version.",UIS_TF(16),XMB_TEXT_DIM,width,false);
+        }else{
+            const JellopInsights &s=job.value;
+            if(s.policy_known){
+                snprintf(line,sizeof line,"Channels: %u eligible / %u hiatus / %u banned",s.eligible,s.hiatus,s.banned);
+                clip_text(x,y0+row++*pitch,line,UIS_TF(18),s.banned||s.hiatus?DL_WARN_CLR:XMB_TEXT,width,true);
+            }else clip_text(x,y0+row++*pitch,"Channel policy unavailable; eligibility not certified.",UIS_TF(18),DL_WARN_CLR,width,true);
+            snprintf(line,sizeof line,"Observed playback: %u/%u sessions; %u sustained (60s+)",s.observed,s.sessions,s.sustained);
+            clip_text(x,y0+row++*pitch,line,UIS_TF(18),XMB_TEXT,width,false);
+            snprintf(line,sizeof line,"Stalled sessions: %u; transport faults: %u",s.stalled,s.transport_faults);
+            clip_text(x,y0+row++*pitch,line,UIS_TF(18),s.stalled||s.transport_faults?DL_WARN_CLR:XMB_TEXT,width,false);
+            if(s.min_reported_free_kib)snprintf(line,sizeof line,"Minimum last-reported playback memory: %u KiB",s.min_reported_free_kib);
+            else snprintf(line,sizeof line,"Playback memory: no reported measurement");
+            clip_text(x,y0+row++*pitch,line,UIS_TF(17),s.min_reported_free_kib&&s.min_reported_free_kib<8192?DL_WARN_CLR:XMB_TEXT,width,false);
+            snprintf(line,sizeof line,"Bridge config revision %u: %s",s.config_revision,s.config_fault?"last-known-good fallback":"valid");
+            clip_text(x,y0+row++*pitch,line,UIS_TF(17),s.config_fault?DL_WARN_CLR:XMB_TEXT,width,false);
+            const char *action=s.config_fault?"Check bridge configuration and revision.":
+                s.stalled||s.transport_faults?"Inspect playback and gateway logs; avoid automatic penalties.":
+                !s.observed?"Play a channel to collect decoded playback evidence.":
+                s.min_reported_free_kib&&s.min_reported_free_kib<8192?"Review stream quality and buffering memory.":
+                s.hiatus||s.banned?"Review excluded channels in Hiatus / Banned.":
+                "No fault in retained observations; not a full health certification.";
+            clip_text(x,y0+row++*pitch,action,UIS_TF(15),XMB_TEXT_DIM,width,false);
+        }
+        unsigned free=meminfo_avail_kb();
+        if(free)snprintf(line,sizeof line,"Current device free memory: %u KiB (menu)",free);
+        else snprintf(line,sizeof line,"Current device free memory: unavailable");
+        clip_text(x,y0+row++*pitch,line,UIS_TF(15),XMB_TEXT_DIM,width,false);
+        static const Hint hints[]={{'S',"Refresh"},{'C',"Back"}};
+        draw_hints_bar(hints,2);flip();pending=true;
+    }
+    if(!pending){frame_begin();flip();}
     init_btns();
 }
 

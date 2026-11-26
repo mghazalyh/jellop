@@ -211,6 +211,7 @@ bool xmb_dl_confirm(const char *title, const char *line, const char *safe,
                     const char *action);
 // A one-option notice in the same style, for a refusal the user can only read.
 void xmb_dl_notice(const char *title, const char *line);
+void xmb_show_insights(void);
 // Whole-season download (xmb/ui_season.cpp): the sheet Triangle opens on a
 // season, the progress line beside the breadcrumb, and the stop at exit.
 void xmb_season_download_sheet(const XMBItem *season);

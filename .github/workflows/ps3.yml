@@ -1,7 +1,7 @@
 name: Jellop PS3
 on:
   push:
-    branches: [main, 'engineering/surf-controls', 'engineering/fullscreen-favourites', 'engineering/policy-view', 'engineering/gateway-profiles', 'engineering/scoped-history']
+    branches: [main, 'engineering/surf-controls', 'engineering/fullscreen-favourites', 'engineering/policy-view', 'engineering/gateway-profiles', 'engineering/scoped-history', 'engineering/insights']
   workflow_dispatch:
 permissions:
   contents: read
@@ -71,6 +71,8 @@ jobs:
           /tmp/test-brightness
           g++ -std=c++11 -Wall -Wextra -Werror -O2 port/test_views_json.cpp -o /tmp/test-views-json
           /tmp/test-views-json
+          g++ -std=c++11 -Wall -Wextra -Werror -O2 port/test_insights.cpp -o /tmp/test-jellop-insights
+          /tmp/test-jellop-insights
           python3 tools/test_surf_acceptance.py
       - name: Upstream Live TV and stream regressions
         working-directory: tests
