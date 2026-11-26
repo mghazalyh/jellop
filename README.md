@@ -27,3 +27,7 @@ For bridge-backed Live TV, the validated 720p output contract permits a compact 
 ## RPCS3 development
 
 See [RPCS3 setup and source review](docs/RPCS3.md). A distinct emulator target preserves the existing RPCS3 renderer work without changing the default hardware target.
+
+## Cross-client parity
+
+Jealousfin and Jealouswin are the reference clients. Jellop's bridge now validates the full `sqlite-policy-v2` catalogue with exact identity membership, filters banned/hiatus channels, exposes an authenticated paginated excluded-channel view, and derives Sports and Movies & Series categories from server tags. Native rows retain bounded genre bits rather than complete tag lists. Malay media paths are accepted with the same token check. The actual PS3 does not load the Flutter website or execute web scripts. A separate public synthetic HLS fixture can be retrieved from Jealouswin Pages for GitHub-hosted testing; no private streams or credentials are published.

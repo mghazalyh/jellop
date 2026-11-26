@@ -5,6 +5,7 @@ into a bounded H.264 + stereo MP3 MPEG-TS stream. No shared policy mutations.
 """
 import argparse
 import hmac
+import math
 import http.server
 import json
 import os
@@ -84,7 +85,7 @@ def filtered_channels(rows,q):
         if term and term not in str(row.get("Name","")).casefold(): continue
         if fav and not (row.get("UserData") or {}).get("IsFavorite"): continue
         # No poster fetches for IPTV. CurrentProgram is kept as received.
-        item = {k:row[k] for k in ("Id","Name","Number","ChannelNumber","UserData","CurrentProgram") if k in row}
+        item = {k:row[k] for k in ("Id","Name","Number","ChannelNumber","UserData","CurrentProgram","Genres","Tags","JellopGenreMask","JellopHealth") if k in row}
         item["Type"]="TvChannel"
         item["IsFolder"]=False
         if first(q,"AddCurrentProgram").casefold()=="false":
@@ -92,13 +93,52 @@ def filtered_channels(rows,q):
         result.append(item)
     return sorted(result,key=lambda x:(str(x.get("Name","")).casefold(),x["Id"]))
 
+def authoritative_catalogue(data, now=None):
+    """Same strict ID/revision contract as Jealouswin's decodeCatalogue."""
+    now=time.time() if now is None else now
+    if not isinstance(data,dict) or not isinstance(data.get("Items"),list):
+        raise Failure(502,"invalid-upstream-catalogue")
+    rows=data["Items"]
+    policy=data.get("JealousfinPolicy")
+    if not isinstance(policy,dict) or policy.get("revision")!="sqlite-policy-v2":
+        raise Failure(503,"gateway-policy-unavailable")
+    health=policy.get("channels")
+    if not isinstance(health,dict) or len(rows)>MAX_CATALOGUE or len(health)!=len(rows):
+        raise Failure(503,"gateway-policy-mismatch")
+    ids=set();result=[]
+    for row in rows:
+        if not isinstance(row,dict) or not isinstance(row.get("Id"),str) or not re.fullmatch(ID,row["Id"]) or not isinstance(row.get("Name"),str):
+            raise Failure(503,"gateway-policy-mismatch")
+        cid=row["Id"]
+        if cid in ids:raise Failure(503,"gateway-policy-mismatch")
+        ids.add(cid)
+        h=health.get(cid)
+        if not isinstance(h,dict) or type(h.get("banned")) is not bool:
+            raise Failure(503,"gateway-policy-mismatch")
+        until=h.get("hiatusUntil")
+        if type(until) not in (int,float) or not math.isfinite(until) or until<0:
+            raise Failure(503,"gateway-policy-mismatch")
+        item=dict(row)
+        tags=" ".join(str(x) for field in ("Genres","Tags") for x in (row.get(field) if isinstance(row.get(field),list) else []) if isinstance(x,str)).casefold()
+        # Native LG_SPORTS=1, LG_MOVIES=2. Match Jealouswin's categories
+        # using authoritative server metadata, never the channel name.
+        item["JellopGenreMask"]=(2 if "sport" in tags else 0)|(4 if re.search(r"movie|series|film|cinema|drama",tags) else 0)
+        item["JellopHealth"]={"banned":h["banned"],"hiatusUntil":until,
+            "eligible":not h["banned"] and until<=now,
+            "failures":h.get("failures",0) if type(h.get("failures")) is int else 0,
+            "successes":h.get("successes",0) if type(h.get("successes")) is int else 0,
+            "reason":str(h.get("reason",""))[:160]}
+        result.append(item)
+    if ids!=set(health):raise Failure(503,"gateway-policy-mismatch")
+    return result
+
 def hls_url(base,path,token):
     # Gateway-generated resource identifiers are opaque and authorization-bound.
     # Never accept client-provided input URLs, redirects or a different origin.
     p = url.urlsplit(path)
     if p.scheme or p.netloc or p.query or p.fragment:
         raise Failure(502,"invalid-upstream-media-path")
-    m = re.fullmatch(r"/media/([A-Za-z0-9_.~-]+)/([a-f0-9]{32})\.m3u8",p.path)
+    m = re.fullmatch(r"/(?:malay/)?media/([A-Za-z0-9_.~-]+)/([a-f0-9]{32})\.m3u8",p.path)
     if not m or not hmac.compare_digest(m[1],token):
         raise Failure(502,"invalid-upstream-media-path")
     return base+p.path
@@ -161,8 +201,9 @@ class ActiveStream:
 
 
 class Bridge:
-    def __init__(self,upstream,binary="ffmpeg",config_path=None):
+    def __init__(self,upstream,binary="ffmpeg",config_path=None,require_policy=True):
         self.base=origin(upstream)
+        self.require_policy=require_policy
         self.config=Config(config_path)
         self.binary=binary
         self.opener=request.build_opener(NoRedirect(),request.ProxyHandler({}))
@@ -188,23 +229,30 @@ class Bridge:
         except (OSError,ValueError) as e:
             raise Failure(502,"upstream-unavailable") from None
 
-    def catalogue(self,token,fresh=False):
+    def catalogue(self,token,fresh=False,include_excluded=False):
         now=time.monotonic()
         with self.lock:
             cached=self.catalogues.get(token)
-            if cached and not fresh and now-cached[0]<10:return cached[1]
-        data=self.upstream("/LiveTv/Channels",token)
-        rows=data.get("Items") if isinstance(data,dict) else None
+            if cached and not fresh and now-cached[0]<10:
+                rows=cached[1]
+                return rows if include_excluded else self.eligible_rows(rows)
+        data=self.upstream("/LiveTv/Channels?JealousfinIncludePolicy=true&Fields=Genres,Tags" if self.require_policy else "/LiveTv/Channels",token)
+        rows=authoritative_catalogue(data) if self.require_policy else data.get("Items") if isinstance(data,dict) else None
         if not isinstance(rows,list) or len(rows)>MAX_CATALOGUE:
             raise Failure(502,"invalid-upstream-catalogue")
         with self.lock:
             self.catalogues[token]=(now,rows)
             self.catalogues.move_to_end(token)
             while len(self.catalogues)>2:self.catalogues.popitem(last=False)
-        return rows
+        return rows if include_excluded else self.eligible_rows(rows)
+
+    def eligible_rows(self,rows):
+        if not self.require_policy:return rows
+        now=time.time()
+        return [r for r in rows if not r['JellopHealth']['banned'] and r['JellopHealth']['hiatusUntil']<=now]
 
     def eligible(self,token,cid):
-        # The authoritative gateway filters its legacy catalogue.
+        # Refresh the authoritative policy before each actual open.
         rows=self.catalogue(token,fresh=True)
         if not any(isinstance(r,dict) and r.get("Id")==cid for r in rows):
             raise Failure(409,"channel-not-eligible")
@@ -328,6 +376,11 @@ class Bridge:
         token=client_token(headers,q)
         if path=="/Videos/ActiveEncodings" and method=="DELETE":
             return self.stop_stream(token,first(q,"PlaySessionId"))
+        if path=="/Jellop/ChannelPolicy" and method=="GET":
+            if not self.require_policy:raise Failure(503,"gateway-policy-unavailable")
+            rows=self.catalogue(token,fresh=True,include_excluded=True)
+            excluded=[r for r in rows if r["JellopHealth"]["banned"] or r["JellopHealth"]["hiatusUntil"]>time.time()]
+            return page_rows(filtered_channels(excluded,q),q)
         if path=="/Jellop/Diagnostics" and method=="GET":return self.diagnostics(token)
         if path=="/Jellop/Config" and method=="GET":
             self.catalogue(token,fresh=True)
@@ -507,7 +560,8 @@ def main():
     parser.add_argument("--port",type=int,default=18800)
     parser.add_argument("--ffmpeg",default="ffmpeg")
     parser.add_argument("--config",help="Optional bounded JSON configuration file")
+    parser.add_argument("--legacy-catalogue",action="store_true",help="Explicit compatibility opt-out for non-Jealousfin upstreams")
     args=parser.parse_args()
-    with Server((args.bind,args.port),Bridge(args.upstream,args.ffmpeg,args.config)) as server:
+    with Server((args.bind,args.port),Bridge(args.upstream,args.ffmpeg,args.config,require_policy=not args.legacy_catalogue)) as server:
         server.serve_forever()
 if __name__=="__main__":main()

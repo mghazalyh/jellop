@@ -1,5 +1,9 @@
 """Local-only synthetic IPTV gateway for the graphical RPCS3 test."""
 import contextlib
+import hashlib
+import os
+import re
+import urllib.request
 import http.server
 import json
 from pathlib import Path
@@ -42,7 +46,9 @@ class Gateway(http.server.BaseHTTPRequestHandler):
                    "JealousfinProgramme":{"source":"provider-catalogue","observedAt":now}} for i,cid in enumerate(CHANNELS)]
         if path=="/LiveTv/Channels":
             return self.send_data({"Items":[{"Id":cid,"Name":"Fixture "+str(i+1),"Number":str(i+1),
-                "UserData":{"IsFavorite":False},"CurrentProgram":programs[i]} for i,cid in enumerate(CHANNELS)]})
+                "Tags":["Sports" if i==0 else "Drama"],
+                "UserData":{"IsFavorite":False},"CurrentProgram":programs[i]} for i,cid in enumerate(CHANNELS)],
+                "JealousfinPolicy":{"revision":"sqlite-policy-v2","channels":{cid:{"banned":False,"hiatusUntil":0} for cid in CHANNELS}}})
         if path=="/LiveTv/Programs":return self.send_data({"Items":programs})
         if path=="/LiveTv/Recordings":return self.send_data({"Items":[]})
         return self.send_data({},404)
@@ -66,11 +72,15 @@ class Gateway(http.server.BaseHTTPRequestHandler):
 def fixture():
     with tempfile.TemporaryDirectory(prefix="jellop-fixture-") as d:
         root=Path(d)
-        subprocess.run(["ffmpeg","-v","error","-y","-f","lavfi","-i","testsrc2=size=640x360:rate=24",
-            "-f","lavfi","-i","sine=frequency=440:sample_rate=48000","-t","90",
-            "-c:v","libx264","-preset","ultrafast","-pix_fmt","yuv420p","-threads","2","-g","48",
-            "-c:a","aac","-f","hls","-hls_time","2","-hls_list_size","0",
-            "-hls_segment_filename",str(root/"seg%03d.ts"),str(root/(RID+".m3u8"))],check=True,timeout=120)
+        if os.environ.get("JELLOP_PUBLIC_FIXTURE")=="1":
+            from pages_fixture import download
+            download(root,RID)
+        else:
+            subprocess.run(["ffmpeg","-v","error","-y","-f","lavfi","-i","testsrc2=size=640x360:rate=24",
+                "-f","lavfi","-i","sine=frequency=440:sample_rate=48000","-t","90",
+                "-c:v","libx264","-preset","ultrafast","-pix_fmt","yuv420p","-threads","2","-g","48",
+                "-c:a","aac","-f","hls","-hls_time","2","-hls_list_size","0",
+                "-hls_segment_filename",str(root/"seg%03d.ts"),str(root/(RID+".m3u8"))],check=True,timeout=120)
         upstream=http.server.ThreadingHTTPServer(("127.0.0.1",0),Gateway)
         upstream.root=root
         upstream.media={p.name for p in root.iterdir()}
@@ -81,7 +91,15 @@ def fixture():
         def paced(*args,**kwargs):
             cmd=original(*args,**kwargs);cmd.insert(cmd.index("-i"),"-re");return cmd
         bridge.ffmpeg_args=paced
-        server=bridge.Server(("127.0.0.1",18096),b)
+        host=os.environ.get("JELLOP_FIXTURE_HOST","127.0.0.1")
+        server=bridge.Server((host,18096),b)
+        # Safe diagnostics: only route class and status, no headers or query/token.
+        class Trace(bridge.Handler):
+            def log_request(self,code="-",size="-"):
+                path=urllib.parse.urlsplit(self.path).path
+                path=re.sub(r"[0-9a-f]{32}","<id>",path)
+                print("FIXTURE_HTTP",self.command,path,code,flush=True)
+        server.RequestHandlerClass=Trace
         threads=[threading.Thread(target=x.serve_forever,daemon=True) for x in (upstream,server)]
         for t in threads:t.start()
         try:yield b

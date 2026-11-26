@@ -762,10 +762,14 @@ void ui_run_xmb(void) {
             smoke = 0;
             FILE *f = fopen(JELLOP_TMP_DIR "/jellop_smoke.txt", "r");
             if (f) {
-                char line[32] = "";
-                if (fgets(line, sizeof line, f) && !strcmp(line,"fixture-surf-v1\n")
-                    && !strcmp(g_server,"http://127.0.0.1:18096")
-                    && !strcmp(g_token,"fixture-token")) smoke = 1;
+                char line[32] = "",endpoint[128]="";
+                if (fgets(line,sizeof line,f) && !strcmp(line,"fixture-surf-v1\n")
+                    && fgets(endpoint,sizeof endpoint,f)) {
+                    endpoint[strcspn(endpoint,"\r\n")]=0;
+                    if(!strcmp(g_server,endpoint)&&!strcmp(g_token,"fixture-token")){
+                        smoke=1;slog_state("JELLOP_SMOKE_ARMED");
+                    }else slog_state("JELLOP_SMOKE_CONFIG_MISMATCH");
+                }
                 fclose(f);
             }
         }

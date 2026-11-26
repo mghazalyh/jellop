@@ -18,6 +18,8 @@ typedef struct {
     char number[12];
     char logo_tag[40];            // ImageTags.Primary, "" when there is no logo
     bool favourite;               // UserData.IsFavorite
+    bool genre_authoritative;
+    uint32_t genre_mask;
     // The current programme (AddCurrentProgram=true); empty without a guide.
     char     now_title[128];
     uint64_t now_start_ticks, now_end_ticks;
@@ -108,5 +110,6 @@ enum {
 };
 // Bit g set for each genre LG_<g> the name suggests.
 unsigned livetv_genre_mask(const char *name);
+unsigned livetv_channel_genres(const JFChannel *channel);
 // The genre's display name, English (translate with tr()).
 const char *livetv_genre_label(int g);

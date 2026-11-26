@@ -69,7 +69,7 @@ const uint64_t T_3H   = 180 * T_MIN;
 const int      MAX_CH      = LIVETV_MAX_CHANNELS;
 const int      MAX_INDEX   = 6000;                  // channel numbers kept (24 KB)
 const int      PAGE_MIN    = 384;                   // at most this many: one numbered category
-const int      GENRE_MIN   = 3;                     // a genre with fewer channels gets no page
+const int      GENRE_MIN   = 1;                     // a genre with fewer channels gets no page
 const int      MAX_PAGES   = 48;                    // categories, genres and the viewer's two
 const int      MAX_PG      = 400;                   // programmes kept: ~130 KB
 const int      GUIDE_ROWS  = 16;                    // channels asked for at once
@@ -198,7 +198,7 @@ void worker_main(void *) {
                 int total = 0;
                 const int n = jf_fetch_channels_range(w_ch, MAX_CH, 0, MAX_CH, &total, NULL);
                 for (int i = 0; i < n; i++) {
-                    const unsigned m = livetv_genre_mask(w_ch[i].name);
+                    const unsigned m = livetv_channel_genres(&w_ch[i]);
                     for (int g = 0; g < LG_COUNT; g++) if (m >> g & 1u) w_gcount[g]++;
                 }
             }
@@ -211,7 +211,7 @@ void worker_main(void *) {
                 n = jf_fetch_channels_range(w_ch, MAX_CH, 0, MAX_CH, &total, NULL);
                 int k = 0;
                 for (int i = 0; i < n; i++)
-                    if (livetv_genre_mask(w_ch[i].name) >> j.genre & 1u) w_ch[k++] = w_ch[i];
+                    if (livetv_channel_genres(&w_ch[i]) >> j.genre & 1u) w_ch[k++] = w_ch[i];
                 if (n >= 0) n = k;
             } else if (j.mode == 2) {
                 if (j.n_recent <= 0) { n = 0; }

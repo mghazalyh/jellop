@@ -68,7 +68,7 @@ class PipelineTests(unittest.TestCase):
                         self.response(200,{"PlaySessionId":sid,"MediaSources":[{"TranscodingUrl":PREFIX}]})
                     else:self.response(404,{})
             with running(http.server.ThreadingHTTPServer(("127.0.0.1",0),Gateway)) as upstream:
-                b=Bridge(upstream)
+                b=Bridge(upstream,require_policy=False)
                 with running(Server(("127.0.0.1",0),b)) as bridge:
                     hdr={"X-Emby-Token":TOKEN}
                     req=urllib.request.Request(bridge+"/Items/"+CID+"/PlaybackInfo",data=b"{}",headers=hdr)

@@ -26,10 +26,12 @@ def main():
     # Only allow the isolated CI profile; never overwrite a personal profile.
     if not os.environ.get("GITHUB_ACTIONS") or "jellop-rpcs3" not in root.parts:
         raise RuntimeError("This fixture harness requires the dedicated CI profile")
-    (game/"jellyfin_config.txt").write_text("http://127.0.0.1:18096\nfixture\n"+TOKEN+"\n"+USER+"\n")
+    host=os.environ.get("JELLOP_FIXTURE_HOST","127.0.0.1")
+    endpoint="http://"+host+":18096"
+    (game/"jellyfin_config.txt").write_text(endpoint+"\nfixture\n"+TOKEN+"\n"+USER+"\n")
     (game/"jellyfin_updatecheck.txt").write_text("0\n")
     (game/"jellyfin_bootanim.txt").write_text("0\n")
-    (tmp/"jellop_smoke.txt").write_text("fixture-surf-v1\n")
+    (tmp/"jellop_smoke.txt").write_text("fixture-surf-v1\n"+endpoint+"\n")
     state=tmp/"jf_state.log"
     config=out/"rpcs3-config.yml"
     config.write_text("Video:\n  Renderer: OpenGL\n  Write Color Buffers: true\n  Read Color Buffers: true\nAudio:\n  Renderer: \"Null\"\n  Music Handler: \"Null\"\nInput/Output:\n  Camera: \"Null\"\nNet:\n  Internet enabled: Connected\n  Bind address: 0.0.0.0\n")
@@ -39,6 +41,13 @@ def main():
     rpcs3_log=cache/"RPCS3.log"
     with fixture() as b, (out/"emulator-stdout.log").open("wb") as log:
         try:
+            import urllib.request
+            with urllib.request.urlopen(endpoint+"/System/Info/Public",timeout=5) as r:
+                assert json.load(r)["ServerName"]=="Jellop CI fixture"
+            req=urllib.request.Request(endpoint+"/Users/"+USER+"/Views",headers={"Authorization":'MediaBrowser Client="PS3", Token="fixture-token"'})
+            with urllib.request.urlopen(req,timeout=5) as r:
+                assert json.load(r)["Items"][0]["CollectionType"]=="livetv"
+            print("Host preflight verified fixture discovery and native authorization",flush=True)
             proc=subprocess.Popen([args.emulator,"--no-gui","--config",str(config),str(boot)],
                 stdout=log,stderr=subprocess.STDOUT,env=env,start_new_session=True)
             deadline=time.monotonic()+300

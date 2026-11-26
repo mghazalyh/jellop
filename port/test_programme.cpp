@@ -43,5 +43,9 @@ int main() {
     assert(livetv_current_programme_index(rows,2,"a",jf_ticks_from_unix(1795620001))==0);
     assert(livetv_current_programme_index(rows,2,"a",jf_ticks_from_unix(1795620150))==-1);
     assert(livetv_current_programme_index(rows,2,"c",jf_ticks_from_unix(1795620001))==-1);
-    puts("Jellop current-only programme and live ring regression checks passed");
+    c=parse(R"JSON({"Items":[{"Id":"abc","Name":"Sports","JellopGenreMask":0}]})JSON");
+    assert(c.genre_authoritative && livetv_channel_genres(&c)==0);
+    c=parse(R"JSON({"Items":[{"Id":"abc","Name":"Unknown","JellopGenreMask":4}]})JSON");
+    assert(livetv_channel_genres(&c)==(1u<<LG_MOVIES));
+    puts("Jellop current-only programme, authoritative categories and live ring regression checks passed");
 }

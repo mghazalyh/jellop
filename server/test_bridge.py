@@ -32,7 +32,7 @@ class BridgeTests(unittest.TestCase):
         self.assertEqual(args[args.index("-ac")+1],"2")
         self.assertEqual(args[args.index("-c:a")+1],"libmp3lame")
     def test_gateway_policy_is_authoritative_and_session_is_one_use(self):
-        b=Bridge("http://gateway")
+        b=Bridge("http://gateway",require_policy=False)
         b.upstream=Mock(side_effect=[{"Items":[{"Id":CID}]},
             {"PlaySessionId":OTHER,"MediaSources":[{"TranscodingUrl":"/media/"+TOKEN+"/"+CID+".m3u8"}]},
             {"Items":[{"Id":CID}]},
@@ -45,7 +45,7 @@ class BridgeTests(unittest.TestCase):
         self.assertEqual(err.exception.status,409)
         self.assertEqual(b.upstream.call_count,4)
     def test_nonopening_probe_and_api(self):
-        b=Bridge("http://gateway")
+        b=Bridge("http://gateway",require_policy=False)
         b.upstream=Mock(return_value={"Items":[{"Id":CID,"Name":"Example","CurrentProgram":{"Name":"Movie"}}]})
         r=b.dispatch("POST","/Items/"+CID+"/PlaybackInfo",{"autoopenlivestream":["false"]},{"X-Emby-Token":TOKEN},b"{}")
         self.assertEqual(r["MediaSources"],[media_source(CID)])

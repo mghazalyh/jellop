@@ -14,7 +14,7 @@ class EvidenceTests(unittest.TestCase):
                 "JellopEvidence":{"Version":1,"Frames":frames,"DecodedMs":ms,"Stalls":stalls,
                 "FreeKiB":10000,"RingPackets":100,"RingCapacity":1000}})
     def test_sustained_is_decoded_not_network(self):
-        b=Bridge("http://gateway");b.upstream=Mock(return_value={"Items":[]})
+        b=Bridge("http://gateway",require_policy=False);b.upstream=Mock(return_value={"Items":[]})
         self.sample(b,0,0,0)
         self.assertEqual(len(b.evidence),0)
         b.stream_started(TOKEN,CID,SID)
@@ -30,7 +30,7 @@ class EvidenceTests(unittest.TestCase):
         self.assertFalse(b.diagnostics(TOKEN)["PolicyMutation"])
         self.assertEqual(b.upstream.call_count,2)
     def test_bad_samples_and_bounded_storage(self):
-        b=Bridge("http://gateway")
+        b=Bridge("http://gateway",require_policy=False)
         for i in range(30):b.stream_started(TOKEN,CID,f"{i:032x}")
         self.assertEqual(len(b.evidence),24)
         b.stream_started(TOKEN,CID,SID)
@@ -38,7 +38,7 @@ class EvidenceTests(unittest.TestCase):
         row=b.evidence[(TOKEN,CID,SID)];self.assertFalse(row["sustained"])
         self.assertEqual(row["run_seconds"],0)
     def test_report_strips_private_extension(self):
-        b=Bridge("http://gateway")
+        b=Bridge("http://gateway",require_policy=False)
         b.upstream=Mock(return_value={})
         b.stream_started(TOKEN,CID,SID)
         data={"ItemId":CID,"PlaySessionId":SID,"IsPaused":False,

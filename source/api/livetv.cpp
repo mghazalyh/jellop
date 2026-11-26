@@ -276,6 +276,12 @@ static void channel_fn(const char *o, const char *e, void *dst) {
     memset(c, 0, sizeof *c);
     str_field(o, e, "Id", c->id, sizeof c->id);
     str_field(o, e, "Name", c->name, sizeof c->name);
+    const char *gm=find_top_value(o,e,"JellopGenreMask");
+    if(gm){
+        const long long mask=read_json_int(gm,e,-1);
+        c->genre_authoritative=true;
+        c->genre_mask=mask>=0 && mask<=((1u<<LG_COUNT)-1) ? (uint32_t)mask : 0;
+    }
     str_field(o, e, "ChannelNumber", c->number, sizeof c->number);
     if (!c->number[0]) str_field(o, e, "Number", c->number, sizeof c->number);
     const char *tags = find_top_value(o, e, "ImageTags");
@@ -506,4 +512,8 @@ unsigned livetv_genre_mask(const char *name) {
 
 const char *livetv_genre_label(int g) {
     return (g >= 0 && g < LG_COUNT) ? G_LABELS[g] : "";
+}
+
+unsigned livetv_channel_genres(const JFChannel *c) {
+    return !c ? 0 : c->genre_authoritative ? c->genre_mask : livetv_genre_mask(c->name);
 }
