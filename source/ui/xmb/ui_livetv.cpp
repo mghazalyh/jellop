@@ -44,6 +44,7 @@
 #include "api_livetv.h"
 #include "api_userdata.h"
 #include "livetv_prefs.h"
+#include "recent_history.h"
 #include "livetv.h"
 #include "jf_paths.h"
 #include "jellyfin_api.h"
@@ -138,6 +139,9 @@ Page       s_pages[MAX_PAGES];  int s_npages = 0;
 int        s_raw_first[MAX_PAGES], s_raw_count[MAX_PAGES], s_raw_cat[MAX_PAGES];
 int        s_raw_n = 0;
 LtPrefs    s_prefs;             bool s_prefs_loaded = false;
+RecentHistory s_history={};
+uint64_t s_history_scope=0,s_catalogue_scope=0;
+const char *const HISTORY_FILE="jellop_history.txt";
 const char *PREFS_FILE = "jellyfin_livetv.txt";
 int        s_page = 0;                              // the one shown
 float     *s_nums = NULL;       int s_nnums = 0;    // every channel's number, list order
@@ -546,22 +550,65 @@ void submit(int kind) {
 //  The viewer's arrangement (livetv_prefs.h)
 // ---------------------------------------------------------------------------
 
+uint64_t history_account_scope() {
+    if(!g_server[0]||!g_userid[0])return 0;
+    uint64_t key=surf_hash(g_userid,surf_hash(g_server));
+    return key?key:1;
+}
+
 void prefs_load(void) {
-    if (s_prefs_loaded) return;
-    s_prefs_loaded = true;
-    lp_init(&s_prefs);
-    FILE *f = fopen(jf_data_path(PREFS_FILE), "r");
-    if (!f) return;
-    char buf[2048];
-    const size_t n = fread(buf, 1, sizeof buf - 1, f);
-    fclose(f);
-    buf[n] = '\0';
-    lp_parse(buf, &s_prefs);
+    if(!s_prefs_loaded){
+        s_prefs_loaded=true;
+        lp_init(&s_prefs);
+        FILE *f=fopen(jf_data_path(PREFS_FILE),"rb");
+        if(f){
+            char buf[2048];
+            size_t n=fread(buf,1,sizeof buf-1,f);
+            bool ok=!ferror(f)&&feof(f)&&!memchr(buf,0,n);
+            fclose(f);buf[n]=0;
+            if(ok)lp_parse(buf,&s_prefs);
+        }
+        // Older recent rows have no account identity. Keep category layout
+        // but never assign those unscoped channel IDs to another account.
+        s_prefs.n_recent=0;
+        memset(s_prefs.recent,0,sizeof s_prefs.recent);
+        f=fopen(jf_data_path(HISTORY_FILE),"rb");
+        if(f){
+            char buf[RECENT_HISTORY_FILE_MAX];
+            size_t n=fread(buf,1,sizeof buf,f);
+            bool ok=!ferror(f)&&n<sizeof buf&&!memchr(buf,0,n);
+            fclose(f);
+            if(ok){buf[n]=0;ok=history_parse(buf,&s_history);}
+            if(!ok)plog("livetv: invalid scoped history ignored");
+        }
+    }
+    uint64_t scope=history_account_scope();
+    if(scope!=s_history_scope){
+        s_history_scope=scope;
+        history_get(&s_history,scope,&s_prefs);
+    }
+}
+
+bool history_save() {
+    RecentHistory next=s_history;
+    if(!history_put(&next,s_history_scope,&s_prefs))return false;
+    char buf[RECENT_HISTORY_FILE_MAX],path[192],tmp[208];
+    int n=history_format(&next,buf,sizeof buf);
+    if(n<0)return false;
+    snprintf(path,sizeof path,"%s",jf_data_path(HISTORY_FILE));
+    snprintf(tmp,sizeof tmp,"%s.tmp",path);
+    FILE *f=fopen(tmp,"wb");
+    if(!f)return false;
+    bool ok=fwrite(buf,1,(size_t)n,f)==(size_t)n&&fflush(f)==0;
+    if(fclose(f)!=0)ok=false;
+    if(ok&&rename(tmp,path)==0){s_history=next;return true;}
+    remove(tmp);plog("livetv: scoped history write failed");return false;
 }
 
 void prefs_save(void) {
     char buf[2048];
-    if (lp_format(&s_prefs, buf, sizeof buf) < 0) return;
+    LtPrefs layout=s_prefs;layout.n_recent=0;
+    if (lp_format(&layout, buf, sizeof buf) < 0) return;
     char path[192],tmp[208];
     snprintf(path,sizeof path,"%s",jf_data_path(PREFS_FILE));
     snprintf(tmp,sizeof tmp,"%s.tmp",path);
@@ -1117,6 +1164,19 @@ void open_guide(void) {
 
 void xmb_livetv_on_enter(void) {
     if (!ensure_alloc()) return;
+    const uint64_t scope=history_account_scope();
+    if(scope!=s_catalogue_scope){
+        // Re-login in the same process must not expose the previous
+        // account's channel/guide buffers or category counts.
+        xmb_livetv_stop();
+        s_jstate=J_IDLE;
+        s_n=s_pn=s_npages=s_page=s_raw_n=s_nnums=0;
+        s_loaded=s_failed=s_index_ok=s_index_tried=s_policy_supported=false;
+        s_pg_rows=s_policy_total=s_sel=s_top=0;
+        s_gen++;
+        s_catalogue_scope=scope;
+    }
+    prefs_load();
     ensure_worker();
     read_utc_offset();
     s_guide = false;
@@ -1162,8 +1222,12 @@ void xmb_livetv_record_played(const char *id) {
     if (!id || !id[0]) return;
     prefs_load();
     if (lp_recent_rank(&s_prefs,id)==0) return;
+    LtPrefs previous=s_prefs;
     lp_note_recent(&s_prefs,id);
-    prefs_save();
+    if(!history_save()){
+        s_prefs=previous;
+        plog("livetv: recent history not saved");
+    }
 }
 
 #if BUILD_FOR_RPCS3

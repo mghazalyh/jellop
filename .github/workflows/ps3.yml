@@ -1,7 +1,7 @@
 name: Jellop PS3
 on:
   push:
-    branches: [main, 'engineering/surf-controls', 'engineering/fullscreen-favourites', 'engineering/policy-view', 'engineering/gateway-profiles']
+    branches: [main, 'engineering/surf-controls', 'engineering/fullscreen-favourites', 'engineering/policy-view', 'engineering/gateway-profiles', 'engineering/scoped-history']
   workflow_dispatch:
 permissions:
   contents: read
