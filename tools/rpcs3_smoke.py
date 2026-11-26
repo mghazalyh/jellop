@@ -36,7 +36,19 @@ def main():
     marker.write_text("fixture-surf-v1\n"+endpoint+"\n")
     state=tmp/"jf_state.log"
     config=out/"rpcs3-config.yml"
-    config.write_text("Video:\n  Renderer: OpenGL\n  Write Color Buffers: true\n  Read Color Buffers: true\nAudio:\n  Renderer: \"Null\"\n  Music Handler: \"Null\"\nInput/Output:\n  Camera: \"Null\"\nNet:\n  Internet enabled: Connected\n  Bind address: 0.0.0.0\n")
+    # Match the virtual CPU capabilities, not the physical AMD model.
+    flag_sets=[set(line.split(":",1)[1].split()) for line in Path("/proc/cpuinfo").read_text().splitlines() if line.split(":",1)[0].strip()=="flags"]
+    if not flag_sets:raise RuntimeError("Host CPU features unavailable")
+    flags=set.intersection(*flag_sets)
+    full512=set("avx512f avx512cd avx512dq avx512bw avx512vl".split())
+    v3=set("avx avx2 bmi1 bmi2 f16c fma movbe xsave".split())
+    v2=set("ssse3 sse4_1 sse4_2 popcnt cx16".split())
+    if full512<=flags:target=""
+    elif v3<=flags and ("abm" in flags or "lzcnt" in flags):target="x86-64-v3"
+    elif v2<=flags:target="x86-64-v2"
+    else:raise RuntimeError("Unsupported runner CPU")
+    print("RPCS3 LLVM target:",target or "auto",flush=True)
+    config.write_text("Core:\n  Use LLVM CPU: "+json.dumps(target)+"\nVideo:\n  Renderer: OpenGL\n  Write Color Buffers: true\n  Read Color Buffers: true\nAudio:\n  Renderer: \"Null\"\n  Music Handler: \"Null\"\nInput/Output:\n  Camera: \"Null\"\nNet:\n  Internet enabled: Connected\n  Bind address: 0.0.0.0\n")
     env=dict(os.environ,LIBGL_ALWAYS_SOFTWARE="1",QT_X11_NO_MITSHM="1")
     proc=None
     cache=Path(os.environ.get("XDG_CACHE_HOME",str(root)))/"rpcs3"
@@ -68,6 +80,53 @@ def main():
                             for key in ("Renderer","Music Handler"):
                                 if not re.search(r"(?m)^  "+key+r': "?Null"?\s*$',audio):
                                     raise RuntimeError("RPCS3 effective Audio "+key+" is not Null")
+                            if target and not re.search(r'(?m)^  Use LLVM CPU: "?' + re.escape(target) + r'"?\s*
+                            print("RPCS3 effective audio configuration verified",flush=True)
+                    if ("Emulation has been frozen!" in recent or
+                        "Thread terminated due to fatal error" in recent):
+                        raise RuntimeError("RPCS3 reported fatal emulation freeze; see RPCS3.log")
+                if proc.poll() is not None:raise RuntimeError("RPCS3 exited before smoke completion: "+str(proc.returncode))
+                lines=state.read_text(errors="replace") if state.exists() else ""
+                if lines!=last_state:
+                    print(lines[len(last_state):] if lines.startswith(last_state) else lines[-4000:],flush=True)
+                    last_state=lines
+                if not guest_started and "MAIN_MENU_ENTER" in lines:
+                    guest_started=True
+                    deadline=time.monotonic()+330
+                    print("Guest reached menu; starting separate playback watchdog",flush=True)
+                if any(x in lines for x in ("JELLOP_SMOKE_MARKER_ABSENT","JELLOP_SMOKE_INVALID_MARKER","JELLOP_SMOKE_CONFIG_MISMATCH")):
+                    raise RuntimeError("Guest did not arm the fixture driver")
+                with b.lock:attempts=list(b.fixture_attempts)
+                if config_verified and "JELLOP_SMOKE_CATALOGUE count=2" in lines:
+                    result=evaluate(lines,CHANNELS,attempts)
+                    if result:
+                        result["excluded_channels"]=EXCLUDED
+                        result["public_fixture"]=os.environ.get("JELLOP_PUBLIC_FIXTURE")=="1"
+                        (out/"result.json").write_text(json.dumps(result,indent=2))
+                        print("Surf acceptance passed:",json.dumps({k:v for k,v in result.items() if k!="sessions"}),flush=True)
+                        subprocess.run(["import","-window","root",str(out/"screen.png")],timeout=15,check=False)
+                        return
+                time.sleep(1)
+            raise RuntimeError("Timed out: "+("guest menu reached; missing catalogue or playback evidence" if guest_started else "guest did not reach main menu"))
+        finally:
+            if not (out/"screen.png").exists():
+                try:subprocess.run(["import","-window","root",str(out/"failure-screen.png")],timeout=15,check=False)
+                except (OSError,subprocess.TimeoutExpired):pass
+            if proc and proc.poll() is None:
+                os.killpg(proc.pid,signal.SIGTERM)
+                try:proc.wait(timeout=10)
+                except subprocess.TimeoutExpired:
+                    os.killpg(proc.pid,signal.SIGKILL);proc.wait()
+            marker.unlink(missing_ok=True)
+            for src in (state,tmp/"crash_log.txt",tmp/"player_log.txt",rpcs3_log):
+                if src.is_file():
+                    with src.open("rb") as f:
+                        f.seek(max(0,src.stat().st_size-2*1024*1024))
+                        (out/src.name).write_bytes(f.read())
+
+if __name__=="__main__":main()
+,used):
+                                raise RuntimeError("RPCS3 CPU override not applied")
                             config_verified=True
                             print("RPCS3 effective audio configuration verified",flush=True)
                     if ("Emulation has been frozen!" in recent or
