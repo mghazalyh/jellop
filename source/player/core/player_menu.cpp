@@ -17,6 +17,7 @@
 #include "player_picture.h"   // picture_cycle_aspect
 #include "timing.h"
 #include "audio.h"           // audio_get_clock_us
+#include "audio_bitstream.h"
 #include "autoskip.h"        // Skip Intros / Skip Credits
 #include "statsovl.h"        // Playback Statistics
 #include "../../build_config.h"   // ENABLE_PLAYER_STATS (relative: source/ is not on the -I path)
@@ -113,7 +114,7 @@ static void open_subs_menu(PlayerState *ps) {
 // Picture) hands over to it; a setting (Statistics, the skips) changes in place
 // and the menu stays open on it; Next / Previous end this playback.
 enum { OPT_CHAPTERS, OPT_TRACKS, OPT_PICTURE, OPT_STATS, OPT_NEXT, OPT_PREV,
-       OPT_SKIP_INTRO, OPT_SKIP_CREDITS, OPT_MAX };
+       OPT_SKIP_INTRO, OPT_SKIP_CREDITS, OPT_BRIGHTNESS, OPT_MUTE, OPT_LIVE_PAUSE, OPT_MAX };
 static int         s_opt_kind[OPT_MAX];
 static const char *s_opt_items[OPT_MAX];
 static const char *s_opt_vals[OPT_MAX];
@@ -146,6 +147,17 @@ static void opt_tracks_value(const PlayerState *ps, char *out, int cap) {
     const char *s = (ps->cur_sub >= 0 && ps->cur_sub < ps->tracks.n_subs)
                   ? ps->tracks.subs[ps->cur_sub].label : TR("Off");
     snprintf(out, cap, "%s / %s", a[0] ? a : TR("Default"), s);
+}
+
+static char s_brightness_labels[31][12];
+static const char *s_brightness_items[31];
+static void open_brightness(PlayerState *ps){
+    for(int i=0;i<31;i++){
+        snprintf(s_brightness_labels[i],sizeof s_brightness_labels[i],"%+d",i-20);
+        s_brightness_items[i]=s_brightness_labels[i];
+    }
+    ps->menu_kind=PLAYER_MENU_BRIGHTNESS;
+    hud_open_menu("Brightness (-20 to +10)",s_brightness_items,31,hud_video_brightness_get()+20);
 }
 
 void player_open_options(PlayerState *ps, int row) {
@@ -187,6 +199,16 @@ void player_open_options(PlayerState *ps, int row) {
         s_opt_kind[n] = OPT_SKIP_CREDITS; s_opt_items[n] = TR("Skip Credits");
         snprintf(s_opt_valbuf[n], sizeof s_opt_valbuf[n], "%s", tr(skip_mode_label(skip_credits_mode()))); n++;
     }
+    s_opt_kind[n]=OPT_BRIGHTNESS;s_opt_items[n]="Brightness";
+    snprintf(s_opt_valbuf[n],sizeof s_opt_valbuf[n],"%+d",hud_video_brightness_get());n++;
+    if(!audio_passthrough_active()){
+        s_opt_kind[n]=OPT_MUTE;s_opt_items[n]="Mute";
+        snprintf(s_opt_valbuf[n],sizeof s_opt_valbuf[n],"%s",audio_get_muted()?"On":"Off");n++;
+    }
+    if(ps->live){
+        s_opt_kind[n]=OPT_LIVE_PAUSE;s_opt_items[n]=ps->paused?"Resume playback":"Pause playback";
+        s_opt_valbuf[n][0]=0;n++;
+    }
     for (int i = 0; i < n; i++) s_opt_vals[i] = s_opt_valbuf[i];
     s_opt_n = n;
     ps->menu_kind = PLAYER_MENU_OPTIONS;
@@ -203,6 +225,9 @@ static HudAction options_select(PlayerState *ps, int sel) {
     case OPT_CHAPTERS:  return player_handle_menu_action(ps, HUD_ACTION_CHAPTERS);
     case OPT_TRACKS:    return player_handle_menu_action(ps, HUD_ACTION_AUDIO_TRACK);
     case OPT_PICTURE:   picture_mode_open(); return HUD_ACTION_NONE;
+    case OPT_BRIGHTNESS: open_brightness(ps);return HUD_ACTION_NONE;
+    case OPT_MUTE: audio_set_muted(!audio_get_muted());break;
+    case OPT_LIVE_PAUSE: return HUD_ACTION_TOGGLE_PAUSE;
     case OPT_NEXT:      return HUD_ACTION_NEXT_ITEM;
     case OPT_PREV:      return HUD_ACTION_PREV_ITEM;
 #if ENABLE_PLAYER_STATS
@@ -270,6 +295,10 @@ HudAction player_handle_menu_action(PlayerState *ps, HudAction act) {
         act = HUD_ACTION_NONE;
         int sel = hud_menu_choice();
         if (ps->menu_kind == PLAYER_MENU_OPTIONS) return options_select(ps, sel);
+        if(ps->menu_kind==PLAYER_MENU_BRIGHTNESS){
+            if(sel>=0&&sel<31)hud_video_brightness_set(sel-20);
+            player_open_options(ps,0);return HUD_ACTION_NONE;
+        }
         if (ps->menu_kind == PLAYER_MENU_CHAPTERS) {
             const JFChapters *c = jf_chapters();
             if (jf_chapters_state() == JF_CHAPTERS_READY && sel >= 0 && sel < c->n) {

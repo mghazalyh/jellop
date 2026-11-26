@@ -1391,6 +1391,7 @@ void show_player_run(const JFItem *item, u32 resume_secs,
         if (ps.have_tracks && ps.cur_audio >= 0 && ps.cur_audio < ps.tracks.n_audio)
             vpick_audio_words(ps.tracks.audio[ps.cur_audio].label, w, sizeof w);
         hud_init(ps.total_secs, w[0] ? w : NULL);
+        hud_video_brightness_load();
         hud_set_item_nav(have_prev, have_next);
     }
     hud_set_title(item->name);
@@ -1911,6 +1912,7 @@ void show_player_run(const JFItem *item, u32 resume_secs,
                 if (to != xmb_livetv_index_of(item->id) && xmb_livetv_get(to, &ch)) {
                     save_surf(now_lv);
                     surf_confirmed=false;
+                    ps.paused=false; // manual channel selection resumes at live edge
                     live_adopt(ch);
                     live_watch_channel_changed(&live_w);
                     live_hud_next(ch.id);
@@ -1920,7 +1922,7 @@ void show_player_run(const JFItem *item, u32 resume_secs,
             }
         }
 
-        if (act == HUD_ACTION_TOGGLE_PAUSE && !live) {
+        if (act == HUD_ACTION_TOGGLE_PAUSE) {
             ps.paused = !ps.paused;
             { sys_ppu_thread_t cur_tid = 0;
               sysThreadGetId(&cur_tid);

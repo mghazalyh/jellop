@@ -74,3 +74,7 @@ void audio_clock_restart(void);
 int  audio_get_volume(void);
 void audio_set_volume(int pct);
 void audio_volume_load(void);
+
+// PCM mute preserves the saved volume; passthrough is controlled by receiver.
+bool audio_get_muted(void);
+void audio_set_muted(bool value);

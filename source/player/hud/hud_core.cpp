@@ -203,9 +203,9 @@ HudAction hud_handle_input(bool l2_pressed, bool r2_pressed, bool paused) {
     // only pauses, so pressing either twice is harmless.  There are no
     // chapters for NEXT/PREV to skip between, so they jump by the largest HUD
     // increment; SCAN repeats while held.
-    // A live channel has no pause: the keys do nothing, and the bar has no such control.
-    if (!g_hud.live && (BTN_PRESSED(playpause) || (BTN_PRESSED(play) && paused) ||
-                        (BTN_PRESSED(pause) && !paused))) {
+    // Live pause is bounded by the existing live-watch stale-resume rule.
+    if (BTN_PRESSED(playpause) || (BTN_PRESSED(play) && paused) ||
+                        (BTN_PRESSED(pause) && !paused)) {
         hud_show();
         return HUD_ACTION_TOGGLE_PAUSE;
     }

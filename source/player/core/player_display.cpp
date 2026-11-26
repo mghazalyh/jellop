@@ -384,6 +384,7 @@ one_to_one_done: ;
     if (ps->frame_count > 0) {
         u32 fw = jbuf_fw(), fh = jbuf_fh();
         vid_gpu_draw(render_blend, blend_factor, fw, fh);
+        hud_video_brightness_draw();
     }
 
     {

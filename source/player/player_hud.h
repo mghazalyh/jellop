@@ -121,3 +121,8 @@ void      hud_close_menu(void);
 
 // Entry chosen by the last HUD_ACTION_MENU_SELECT.
 int       hud_menu_choice(void);
+
+int hud_video_brightness_get(void);
+void hud_video_brightness_load(void);
+void hud_video_brightness_set(int value);
+void hud_video_brightness_draw(void);

@@ -85,6 +85,9 @@ int audio_output_channels(void) { return s_output_channels; }
 // slider (d-pad up/down on the speaker control).
 #define VOLUME_FILE "jellyfin_volume.txt"
 static volatile int s_volume_pct = 100;
+static volatile bool s_audio_muted=false;
+bool audio_get_muted(void){return s_audio_muted;}
+void audio_set_muted(bool value){s_audio_muted=value;}
 
 int  audio_get_volume(void) { return s_volume_pct; }
 
@@ -111,7 +114,7 @@ void audio_volume_load(void) {
 
 // Scale one interleaved float block in place by the master volume.
 static void apply_volume(float *buf, int frames, int channels) {
-    int pct = s_volume_pct;
+    int pct = s_audio_muted ? 0 : s_volume_pct;
     if (pct >= 100) return;              // unity: leave the block untouched
     float g = (float)pct / 100.0f;
     int n = frames * channels;

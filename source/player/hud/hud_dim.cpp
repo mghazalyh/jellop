@@ -22,6 +22,20 @@
 #include "player_hud_internal.h"
 #include "hud_dim_shaders.h"
 #include "rsxutil.h"
+#include "video_brightness.h"
+#include "jf_paths.h"
+static int s_video_brightness=0;
+int hud_video_brightness_get(void){return s_video_brightness;}
+void hud_video_brightness_load(void){
+    s_video_brightness=0;
+    FILE *f=fopen(jf_data_path("jellop_brightness.txt"),"r");
+    if(f){int v=0;if(fscanf(f,"%d",&v)==1)s_video_brightness=video_brightness_clamp(v);fclose(f);}
+}
+void hud_video_brightness_set(int value){
+    s_video_brightness=video_brightness_clamp(value);
+    FILE *f=fopen(jf_data_path("jellop_brightness.txt"),"w");
+    if(f){fprintf(f,"%d\n",s_video_brightness);fclose(f);}
+}
 
 extern void crash_log(const char *msg);
 
@@ -144,9 +158,9 @@ static void draw_dim_rect(u32 rx, u32 ry, u32 rw, u32 rh, u8 alpha) {
 // Default: inline GPU quad -- all 4 vertices submitted directly into the RSX
 // command FIFO. No vertex-array fetch step: no stale array binding can wedge
 // the GPU. Runs on the GPU so frame time stays at ~16ms with HUD visible.
-static void draw_dim_rect_inline(u32 rx, u32 ry, u32 rw, u32 rh, u8 alpha) {
-    crash_log("dr1 enter");
-    if (!s_hud_fp_buf) { crash_log("dr1 null rsrc"); return; }
+static void draw_dim_rect_inline(u32 rx, u32 ry, u32 rw, u32 rh, u8 alpha, u8 grey=0, bool trace=true) {
+    if(trace) crash_log("dr1 enter");
+    if (!s_hud_fp_buf) { if(trace) crash_log("dr1 null rsrc"); return; }
 
     float W = (float)display_width;
     float H = (float)display_height;
@@ -174,19 +188,19 @@ static void draw_dim_rect_inline(u32 rx, u32 ry, u32 rw, u32 rh, u8 alpha) {
         GCM_SRC_ALPHA, GCM_ONE_MINUS_SRC_ALPHA);
     rsxSetBlendEquation(context, GCM_FUNC_ADD, GCM_FUNC_ADD);
     rsxSetBlendEnable(context, GCM_TRUE);
-    crash_log("dr2 state set");
+    if(trace) crash_log("dr2 state set");
 
     // POS = attrib 0, COLOR0 = attrib 3 (from hud_dim_vp: vertex.position/vertex.color).
     // Push color before position per vertex; the trailing position command latches
     // the vertex into the FIFO (matches Movian realityAttr4f/realityVertex4f ordering).
-    const u8   col[4] = { 0, 0, 0, alpha };
+    const u8   col[4] = { grey, grey, grey, alpha };
     const float tl[4] = { x0, y0, 0.f, 1.f };
     const float tr[4] = { x1, y0, 0.f, 1.f };
     const float bl[4] = { x0, y1, 0.f, 1.f };
     const float br[4] = { x1, y1, 0.f, 1.f };
 
     rsxDrawVertexBegin(context, GCM_TYPE_TRIANGLE_STRIP);
-    crash_log("dr3 begin");
+    if(trace) crash_log("dr3 begin");
 
     rsxDrawVertex4ub(context, GCM_VERTEX_ATTRIB_COLOR0, col);
     rsxDrawVertex4f (context, GCM_VERTEX_ATTRIB_POS,    tl);
@@ -196,12 +210,12 @@ static void draw_dim_rect_inline(u32 rx, u32 ry, u32 rw, u32 rh, u8 alpha) {
     rsxDrawVertex4f (context, GCM_VERTEX_ATTRIB_POS,    bl);
     rsxDrawVertex4ub(context, GCM_VERTEX_ATTRIB_COLOR0, col);
     rsxDrawVertex4f (context, GCM_VERTEX_ATTRIB_POS,    br);
-    crash_log("dr4 verts pushed");
+    if(trace) crash_log("dr4 verts pushed");
 
     rsxDrawVertexEnd(context);
     rsxSetBlendEnable(context, GCM_FALSE);
-    crash_log("dr5 end blend off");
-    crash_log("dr6 return");
+    if(trace) crash_log("dr5 end blend off");
+    if(trace) crash_log("dr6 return");
 }
 #endif /* dim path selector */
 
@@ -217,5 +231,15 @@ void hud_dim_rect(u32 rx, u32 ry, u32 rw, u32 rh, u8 alpha) {
 #else
     draw_dim_rect_inline(rx, ry, rw, rh, alpha);
     rsxSync();
+#endif
+}
+
+void hud_video_brightness_draw(void){
+    if(!s_video_brightness)return;
+#if !defined(HUD_DIM_CPU) && !defined(HUD_DIM_GPU_ARRAY)
+    // FIFO-ordered after the video quad and before subtitle/HUD rendering.
+    // No CPU framebuffer scan, per-frame logging or additional GPU buffer.
+    draw_dim_rect_inline(0,0,display_width,display_height,
+        (u8)video_brightness_alpha(s_video_brightness),s_video_brightness>0?255:0,false);
 #endif
 }

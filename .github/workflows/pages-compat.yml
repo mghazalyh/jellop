@@ -1,0 +1,38 @@
+name: Jealouswin public fixture compatibility
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'tools/pages_fixture.py'
+      - 'tools/test_pages_pipeline.py'
+      - 'tools/rpcs3_fixture.py'
+      - 'server/**'
+      - '.github/workflows/pages-compat.yml'
+permissions:
+  contents: read
+jobs:
+  deployed-media:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare media tools
+        run: |
+          if ! command -v ffmpeg >/dev/null; then
+            sudo apt-get update && sudo apt-get install -y ffmpeg
+          fi
+      - name: Verify actual deployed HTTPS fixture and transport
+        env:
+          JELLOP_PUBLIC_FIXTURE: '1'
+          JELLOP_FIXTURE_HOST: '127.0.0.1'
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 8); do
+            if python3 -c 'import sys,json;sys.path.insert(0,"tools");from pages_fixture import get;assert json.loads(get("manifest.json",32768))["synthetic"] is True'; then
+              python3 tools/test_pages_pipeline.py
+              exit 0
+            fi
+            if test "$i" = 8; then exit 1; fi
+            sleep 15
+          done
