@@ -50,6 +50,22 @@ void lp_note_recent(LtPrefs *p, const char *id) {
     snprintf(p->recent[0], LP_ID_MAX, "%s", id);
 }
 
+int lp_recent_query_batch(const char ids[][LP_ID_MAX], int n, int first, char *out, int cap) {
+    if(!ids||!out||cap<6||n<0||n>LP_MAX_RECENT||first<0||first>=n)return -1;
+    int count=n-first;
+    if(count>LP_RECENT_BATCH)count=LP_RECENT_BATCH;
+    memcpy(out,"&Ids=",6);
+    int used=5;
+    for(int i=0;i<count;i++){
+        const char *id=ids[first+i];
+        if(!memchr(id,0,LP_ID_MAX)||!id_ok(id)){out[0]=0;return -1;}
+        int size=snprintf(out+used,(size_t)(cap-used),"%s%s",i?",":"",id);
+        if(size<0||size>=cap-used){out[0]=0;return -1;}
+        used+=size;
+    }
+    return count;
+}
+
 int lp_parse(const char *text, LtPrefs *p) {
     lp_init(p);
     if (!text) return 0;

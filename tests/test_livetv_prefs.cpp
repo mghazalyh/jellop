@@ -42,7 +42,7 @@ static void recent(void) {
     char id[16];
     for (int i = 0; i < 30; i++) { snprintf(id, sizeof id, "ch%d", i); lp_note_recent(&p, id); }
     CHECK(p.n_recent == LP_MAX_RECENT);
-    CHECK(!strcmp(p.recent[0], "ch29") && !strcmp(p.recent[LP_MAX_RECENT - 1], "ch18"));
+    CHECK(!strcmp(p.recent[0], "ch29") && !strcmp(p.recent[LP_MAX_RECENT - 1], "ch0"));
     CHECK(lp_recent_rank(&p, "aaa") == LP_MAX_RECENT);   // fell off
     // Re-noting one in the middle of a full list.
     lp_note_recent(&p, "ch20");
@@ -52,6 +52,40 @@ static void recent(void) {
     lp_note_recent(&p, ""); lp_note_recent(&p, NULL); lp_note_recent(&p, "has space");
     lp_note_recent(&p, "new\nline"); lp_note_recent(&p, "0123456789012345678901234567890123456789");
     CHECK(p.n_recent == n && !strcmp(p.recent[0], "ch20"));
+}
+
+static void recent_batches(void) {
+    LtPrefs p;lp_init(&p);
+    char id[LP_ID_MAX];
+    for(int i=0;i<45;i++){
+        snprintf(id,sizeof id,"%039d",i);
+        lp_note_recent(&p,id);
+    }
+    CHECK(p.n_recent==30);
+    CHECK(lp_recent_rank(&p,"000000000000000000000000000000000000000")==LP_MAX_RECENT);
+    int fetched=0;
+    for(int first=0;first<p.n_recent;){
+        char query[LP_RECENT_BATCH*(LP_ID_MAX+1)+8];
+        int n=lp_recent_query_batch(p.recent,p.n_recent,first,query,sizeof query);
+        CHECK(n==6&&strlen(query)==5+6*39+5);
+        CHECK(!strncmp(query,"&Ids=",5));
+        CHECK(strstr(query,p.recent[first])!=NULL);
+        CHECK(strstr(query,p.recent[first+n-1])!=NULL);
+        if(n<=0)break;
+        first+=n;fetched+=n;
+    }
+    CHECK(fetched==30);
+    char tiny[10];CHECK(lp_recent_query_batch(p.recent,p.n_recent,0,tiny,sizeof tiny)==-1);
+    strcpy(p.recent[0],"x&bad");CHECK(lp_recent_query_batch(p.recent,p.n_recent,0,tiny,sizeof tiny)==-1);
+    // Full history plus all hidden category flags fits the existing disk cap.
+    lp_init(&p);
+    for(int i=0;i<30;i++){snprintf(id,sizeof id,"%039d",i);lp_note_recent(&p,id);}
+    for(int i=0;i<LP_MAX_HIDDEN;i++)lp_set_hidden(&p,99999-i,true);
+    p.last=99999;
+    char serialized[2048];LtPrefs q;
+    CHECK(lp_format(&p,serialized,sizeof serialized)>0);
+    CHECK(lp_parse(serialized,&q)==63&&q.n_recent==30&&q.n_hidden==32);
+    CHECK(!strcmp(q.recent[0],p.recent[0])&&!strcmp(q.recent[29],p.recent[29]));
 }
 
 static void file(void) {
@@ -158,6 +192,7 @@ int main() {
     hidden();
     genres();
     recent();
+    recent_batches();
     file();
     pages();
     printf("%d checks, %d failed\n", s_checks, s_failed);
