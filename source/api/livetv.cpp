@@ -271,11 +271,36 @@ static void programme_evidence(const char *o, const char *e, char *title,
         memmove(title, title + sizeof prefix - 1, strlen(title + sizeof prefix - 1) + 1);
 }
 
+static int policy_boolean(const char *o, const char *e, const char *key) {
+    const char *v = find_top_value(o, e, key);
+    if (!v) return -1;
+    const bool yes = e-v >= 4 && !memcmp(v, "true", 4);
+    const bool no = e-v >= 5 && !memcmp(v, "false", 5);
+    if (!yes && !no) return -1;
+    v=skip_ws(v+(yes?4:5),e);
+    return v < e && (*v==',' || *v=='}') ? (yes?1:0) : -1;
+}
+bool livetv_policy_excluded(const JFChannel *c) {
+    return c && (c->policy_state==LT_POLICY_BANNED || c->policy_state==LT_POLICY_HIATUS);
+}
+static void channel_policy(const char *o,const char *e,JFChannel *c) {
+    const char *p=find_top_value(o,e,"JellopHealth");
+    const char *end=p?object_end(p,e):NULL;
+    if(!end)return;
+    const int banned=policy_boolean(p,end,"banned"), eligible=policy_boolean(p,end,"eligible");
+    const char *until=find_top_value(p,end,"hiatusUntil");
+    const long long n=until?read_json_int(until,end,-1):-1;
+    if(banned<0 || eligible<0 || n<0 || (unsigned long long)n>0xffffffffULL ||
+       (banned && eligible) || (!banned && !eligible && !n))return;
+    c->policy_state=banned?LT_POLICY_BANNED:eligible?LT_POLICY_ELIGIBLE:LT_POLICY_HIATUS;
+    c->policy_until_unix=(uint32_t)n;
+}
 static void channel_fn(const char *o, const char *e, void *dst) {
     JFChannel *c = (JFChannel *)dst;
     memset(c, 0, sizeof *c);
     str_field(o, e, "Id", c->id, sizeof c->id);
     str_field(o, e, "Name", c->name, sizeof c->name);
+    channel_policy(o,e,c);
     const char *gm=find_top_value(o,e,"JellopGenreMask");
     if(gm){
         const long long mask=read_json_int(gm,e,-1);

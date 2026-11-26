@@ -98,6 +98,46 @@ int jf_fetch_channels_range(JFChannel *out, int max, int start, int count, int *
     return n;
 }
 
+int jf_fetch_excluded_channels(JFChannel *out, int max, int *total_out) {
+    if(total_out)*total_out=0;
+    if(!out||max<=0||!g_server[0]||!g_token[0])return -1;
+    if(max>LIVETV_MAX_CHANNELS)max=LIVETV_MAX_CHANNELS;
+    char *buf=(char *)malloc(PAGE_BUF);
+    if(!buf)return -1;
+    int n=0, expected=-1;
+    bool valid=true;
+    do {
+        const int want=max-n<CHANNEL_PAGE?max-n:CHANNEL_PAGE;
+        char url[512];
+        const int len=snprintf(url,sizeof url,
+            "%s/Jellop/ChannelPolicy?StartIndex=%d&Limit=%d&AddCurrentProgram=false",
+            g_server,n,want);
+        if(len<=0||len>=(int)sizeof url){valid=false;break;}
+        buf[0]=0;
+        const int status=http_request(HTTP_GET,url,NULL,g_token,buf,PAGE_BUF);
+        if(status!=200){valid=false;break;}
+        bool truncated=false;
+        int total=0;
+        const int got=livetv_parse_channels(buf,(int)strlen(buf),out+n,want,&total,&truncated);
+        if(expected<0)expected=total;
+        if(truncated||total!=expected||total<0||total>2048||got<0||got>want||
+           got!=(total-n<want?total-n:want)){valid=false;break;}
+        for(int i=0;i<got&&valid;i++){
+            const JFChannel *row=out+n+i;
+            if(!row->id[0]||!row->name[0]||!livetv_policy_excluded(row)){valid=false;break;}
+            for(int prior=0;prior<n+i;prior++)if(!strcmp(out[prior].id,row->id)){valid=false;break;}
+        }
+        if(!valid)break;
+        n+=got;
+        if(!got)break;
+    }while(n<expected&&n<max);
+    free(buf);
+    if(!valid||expected<0)return -1;
+    if(total_out)*total_out=expected;
+    livetv_sort_channels(out,n);
+    return n;
+}
+
 #define NUMBER_PAGE 50
 
 int jf_fetch_channel_numbers(float *out, int max, int *total_out) {

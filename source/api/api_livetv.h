@@ -15,6 +15,8 @@
 // channel's current programme.  Fetched in pages so a reply never reaches the
 // response cap.  Returns the count, or -1 when the server could not be asked.
 int jf_fetch_channels(JFChannel *out, int max);
+// Optional, read-only bridge endpoint. -1 on unsupported or invalid response.
+int jf_fetch_excluded_channels(JFChannel *out, int max, int *total_out = NULL);
 
 // The same, for `count` channels from list position `start` (the server's
 // order: by number).  *total (optional) is how many channels the server has.

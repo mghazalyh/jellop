@@ -143,11 +143,17 @@ int        s_page = 0;                              // the one shown
 float     *s_nums = NULL;       int s_nnums = 0;    // every channel's number, list order
 bool       s_index_ok = false;                      // s_nums / s_pages describe the server
 bool       s_index_tried = false;                   // asked since the tab opened (or the list changed)
+const int LP_POLICY = -3;
+bool       s_policy_supported = false;
+int        s_policy_total = 0;
 bool paging(void) { return s_index_ok && s_npages > 1; }
 
 // ---- search ----
 bool s_search_on = false;
 char s_term[48]  = "";
+bool policy_page(void) {
+    return s_index_ok && !s_search_on && s_page >= 0 && s_page < s_npages && s_pages[s_page].key==LP_POLICY;
+}
 int  s_gen       = 0;       // bumped when the list being fetched changes (page, search)
 
 // ---- the worker ----
@@ -173,6 +179,7 @@ Job              s_job;
 JFChannel       *w_ch = NULL;    int w_n = 0;       bool w_ch_ok = false;
 int              w_ctotal = 0;                      // the server's channel count, with that reply
 float           *w_nums = NULL;  int w_nnums = 0;   bool w_idx_ok = false;
+bool             w_policy_supported = false;
 int              w_gcount[LG_COUNT];                // with the numbers: channels per genre
 JFProgram       *w_pg = NULL;    int w_pn = 0;
 sys_ppu_thread_t s_tid;
@@ -187,6 +194,7 @@ void worker_main(void *) {
         const Job j = s_job;
         w_ch_ok = false;
         w_idx_ok = false;
+        w_policy_supported = false;
         w_pn = 0;
         if (j.kind & JOB_INDEX) {
             w_nnums = jf_fetch_channel_numbers(w_nums, MAX_INDEX, NULL);
@@ -201,11 +209,14 @@ void worker_main(void *) {
                     const unsigned m = livetv_channel_genres(&w_ch[i]);
                     for (int g = 0; g < LG_COUNT; g++) if (m >> g & 1u) w_gcount[g]++;
                 }
+                w_policy_supported=jf_fetch_excluded_channels(w_ch,1,NULL)>=0;
             }
         }
         if (j.kind & JOB_CHANNELS) {
             int total = 0, n;
-            if (j.mode == 1) {
+            if (j.mode == 4) {
+                n=jf_fetch_excluded_channels(w_ch,MAX_CH,&total);
+            } else if (j.mode == 1) {
                 n = jf_fetch_channels_range(w_ch, MAX_CH, 0, MAX_CH, &total, NULL, "&isFavorite=true");
             } else if (j.mode == 3) {
                 n = jf_fetch_channels_range(w_ch, MAX_CH, 0, MAX_CH, &total, NULL);
@@ -438,6 +449,16 @@ struct NowNext {
 
 void now_next(const JFChannel *c, uint64_t now, NowNext *o) {
     memset(o, 0, sizeof *o);
+    if(policy_page()){
+        if(c->policy_state==LT_POLICY_BANNED)snprintf(o->now,sizeof o->now,"Banned - unavailable");
+        else if(c->policy_state==LT_POLICY_HIATUS){
+            char utc[40];
+            if(jf_iso8601_from_ticks(jf_ticks_from_unix(c->policy_until_unix),utc,sizeof utc))
+                snprintf(o->now,sizeof o->now,"Hiatus until %.10s %.5s UTC",utc,utc+11);
+            else snprintf(o->now,sizeof o->now,"Hiatus - unavailable");
+        }else snprintf(o->now,sizeof o->now,"Policy unavailable");
+        return;
+    }
     const JFProgram *ps[24];
     const int n = progs_of(c->id, ps, 24);
     int cur = -1;
@@ -465,6 +486,7 @@ void now_next(const JFChannel *c, uint64_t now, NowNext *o) {
 }
 
 bool have_guide(void) {
+    if(policy_page())return false;
     if (s_pn > 0) return true;
     for (int i = 0; i < s_n; i++) if (s_ch[i].now_title[0]) return true;
     return false;
@@ -483,6 +505,9 @@ void submit(int kind) {
         snprintf(s_job.term, sizeof s_job.term, "%s", s_term);
         s_job.cfirst = 0;
         s_job.ccount = MAX_CH;
+    } else if (policy_page()) {
+        s_job.mode=4;
+        s_job.ccount=MAX_CH;
     } else if (paging() && LP_IS_GENRE(s_pages[s_page].key)) {
         s_job.mode = 3;
         s_job.genre = LP_GENRE_OF(s_pages[s_page].key);
@@ -551,7 +576,7 @@ void prefs_save(void) {
 
 // The key of the page on screen while the tab is paged (and not searching), else 0.
 int cur_key(void) {
-    return (paging() && !s_search_on && s_page < s_npages) ? s_pages[s_page].key : 0;
+    return (s_index_ok && !s_search_on && s_page >= 0 && s_page < s_npages) ? s_pages[s_page].key : 0;
 }
 
 // The pages on offer: what the server has, less what the viewer hid, behind
@@ -561,7 +586,8 @@ void build_pages(int want) {
     int bases[MAX_PAGES], keys[MAX_PAGES], genres[LG_COUNT], ng = 0;
     for (int i = 0; i < s_raw_n; i++) bases[i] = CATS[s_raw_cat[i]].base;
     for (int g = 0; g < LG_COUNT; g++) if (s_gcount[g] >= GENRE_MIN) genres[ng++] = LP_GENRE(g);
-    const int n = lp_build_pages_ex(&s_prefs, bases, s_raw_n, genres, ng, keys, MAX_PAGES);
+    int n = lp_build_pages_ex(&s_prefs, bases, s_raw_n, genres, ng, keys, MAX_PAGES-(s_policy_supported?1:0));
+    if(s_policy_supported)keys[n++]=LP_POLICY;
     s_npages = 0;
     for (int k = 0; k < n; k++) {
         Page &pg = s_pages[s_npages++];
@@ -594,6 +620,7 @@ void collect(void) {
                 s_raw_first[0] = 0; s_raw_count[0] = s_nnums; s_raw_cat[0] = 0;
             }
             memcpy(s_gcount, w_gcount, sizeof s_gcount);
+            s_policy_supported=w_policy_supported;
             prefs_load();
             build_pages(key_was);
             s_index_ok = true;
@@ -616,6 +643,7 @@ void collect(void) {
             if (s_sel >= 0 && s_sel < s_n) snprintf(keep, sizeof keep, "%s", s_ch[s_sel].id);
             memcpy(s_ch, w_ch, sizeof(JFChannel) * (size_t)w_n);
             s_n = w_n;
+            if(j.mode==4)s_policy_total=w_ctotal;
             s_loaded = true; s_failed = false;
             int at = -1;
             for (int i = 0; i < s_n; i++) if (keep[0] && !strcmp(s_ch[i].id, keep)) { at = i; break; }
@@ -681,7 +709,7 @@ void tick(void) {
         submit(JOB_CHANNELS);
         return;
     }
-    if (s_n > 0 && !guide_current() && now - s_view_changed_us >= DEBOUNCE_US)
+    if (!policy_page() && s_n > 0 && !guide_current() && now - s_view_changed_us >= DEBOUNCE_US)
         submit(JOB_GUIDE);
 }
 
@@ -693,7 +721,7 @@ void tick(void) {
 // it until the new one arrives, and let anything still on its way be dropped.
 void list_changed(void) {
     s_gen++;
-    s_n = 0; s_pn = 0;
+    s_n = 0; s_pn = 0; s_policy_total=0;
     s_loaded = false; s_failed = false;
     s_sel = 0; s_top = 0;
     s_pg_rows = 0;
@@ -707,8 +735,10 @@ void set_page(int p) {
     if (p >= s_npages) p = 0;
     if (p == s_page) return;
     s_page = p;
-    s_prefs.last = s_pages[s_page].key;
-    prefs_save();
+    if(!policy_page()){
+        s_prefs.last = s_pages[s_page].key;
+        prefs_save();
+    }
     list_changed();
 }
 
@@ -750,6 +780,7 @@ void key_label(int key, int cat, char *out, int cap) {
         snprintf(out, (size_t)cap, "%s", tr(GENRE_LABEL[LP_GENRE_OF(key)]));
     else if (key == LP_FAVS)        snprintf(out, (size_t)cap, "%s", TR("Favourites"));
     else if (key == LP_RECENT) snprintf(out, (size_t)cap, "%s", TR("Recently watched"));
+    else if (key == LP_POLICY) snprintf(out,(size_t)cap,"Hiatus / Banned");
     else                       cat_label(cat, out, cap);
 }
 
@@ -889,7 +920,9 @@ uint64_t surf_scope_key() {
 }
 
 void play_channel(int idx) {
-    if (idx < 0 || idx >= s_n) return;
+    if (idx < 0 || idx >= s_n || policy_page() || livetv_policy_excluded(&s_ch[idx])) {
+        ui_sfx_play(SFX_CANCEL);return;
+    }
     JFItem jf;
     memset(&jf, 0, sizeof jf);
     snprintf(jf.id,   sizeof jf.id,   "%s", s_ch[idx].id);
@@ -1136,7 +1169,7 @@ void xmb_livetv_record_played(const char *id) {
 #if BUILD_FOR_RPCS3
 bool xmb_livetv_smoke_start(void) {
     tick(); // identical render-thread catalogue pump, once per frame
-    if (!s_loaded || s_n < 2) return false;
+    if (!s_loaded || s_n < 2 || policy_page()) return false;
     slog_state("JELLOP_SMOKE_CATALOGUE count=%d",s_n);
     s_surf_requested=true;
     play_channel(0);
@@ -1144,9 +1177,9 @@ bool xmb_livetv_smoke_start(void) {
 }
 #endif
 
-int  xmb_livetv_count(void) { return s_n; }
+int  xmb_livetv_count(void) { return policy_page()?0:s_n; }
 bool xmb_livetv_get(int i, JFChannel *out) {
-    if (i < 0 || i >= s_n || !out) return false;
+    if (i < 0 || i >= s_n || !out || policy_page() || livetv_policy_excluded(&s_ch[i])) return false;
     *out = s_ch[i];
     return true;
 }
@@ -1204,6 +1237,9 @@ bool xmb_input_livetv(void) {
             if (BTN_REPEAT(down) && s_sel < s_n - 1) s_sel++;
         }
         if (s_sel != was) { keep_visible(); ui_sfx_play(SFX_CURSOR); }
+        if(policy_page() && (BTN_PRESSED(l3)||BTN_PRESSED(cross)||BTN_PRESSED(triangle))){
+            ui_sfx_play(SFX_CANCEL);return false;
+        }
         if (BTN_PRESSED(l3)) {
             SurfStore store;
             int at=s_sel;
@@ -1276,8 +1312,10 @@ bool xmb_input_livetv(void) {
 void xmb_livetv_hints(void) {
     Hint h[10]; int n = 0;
     if (!s_guide) {
-        h[n].glyph = 'X'; h[n].label = TRN("Watch"); n++;
-        h[n].glyph = 'T'; h[n].label = TRN("Favourite"); n++;
+        if(!policy_page()){
+            h[n].glyph = 'X'; h[n].label = TRN("Watch"); n++;
+            h[n].glyph = 'T'; h[n].label = TRN("Favourite"); n++;
+        }
         if (have_guide()) { h[n].glyph = classic_grid() ? 'S' : '>'; h[n].label = TRN("Guide"); n++; }
         // L2 and R2 pair into one "Category" hint (an empty label pairs with the next).
         if (paging() && !s_search_on) {
@@ -1538,7 +1576,8 @@ static void classic_heading(void) {
         int last = s_top + g.cols * g.rows;
         if (last > s_n) last = s_n;
         char pos[48];
-        snprintf(pos, sizeof pos, "%d - %d / %d", s_top + 1, last, s_n);
+        snprintf(pos, sizeof pos, "%d - %d / %d", s_top + 1, last,
+                 policy_page()&&s_policy_total>s_n?s_policy_total:s_n);
         const float px = UIS_TF(14);
         drawTTF((u32)((int)display_width - g.x0 - ttf_text_width(pos, px)), (u32)(y + UIS_H(9)),
                 pos, px, XMB_TEXT_DIM);
@@ -1570,6 +1609,7 @@ void xmb_draw_livetv(void) {
                       : s_search_on ? TR("No channels found")
                       : cur_key() == LP_FAVS ? TR("No favourites yet. Press {TRIANGLE} on a channel to add it.")
                       : cur_key() == LP_RECENT ? TR("Nothing watched yet")
+                      : policy_page() ? "No excluded channels"
                       : TR("No channels");
         drawTTF_rich((u32)(cx - ttf_rich_width(m, UIS_TF(18), false) / 2), (u32)(band_top() + UIS_H(60)), m,
                      UIS_TF(18), XMB_TEXT_DIM, false);
@@ -1637,6 +1677,7 @@ void xmb_draw_livetv(void) {
                           text_r - o.text_x, false);
                 // On the right: the slot's times over its progress bar, and
                 // what is next under it.
+                if(policy_page())continue;
                 char a[16], b[16], times[48];
                 fmt_hm(nn.now_start, a, sizeof a);
                 fmt_hm(nn.now_end, b, sizeof b);
@@ -1652,7 +1693,8 @@ void xmb_draw_livetv(void) {
         }
         // Where the selection is in the list, at the right of the tabs.
         char pos[24];
-        snprintf(pos, sizeof pos, "%d / %d", s_sel + 1, s_n);
+        snprintf(pos, sizeof pos, "%d / %d", s_sel + 1,
+                 policy_page()&&s_policy_total>s_n?s_policy_total:s_n);
         const int pw = ttf_text_width(pos, UIS_TF(14));
         drawTTF((u32)(list_x() + list_w() - pw), (u32)(list_top() - UIS_H(30)), pos, UIS_TF(14), XMB_TEXT_FAINT);
         return;

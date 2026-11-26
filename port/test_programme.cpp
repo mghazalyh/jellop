@@ -47,5 +47,15 @@ int main() {
     assert(c.genre_authoritative && livetv_channel_genres(&c)==0);
     c=parse(R"JSON({"Items":[{"Id":"abc","Name":"Unknown","JellopGenreMask":4}]})JSON");
     assert(livetv_channel_genres(&c)==(1u<<LG_MOVIES));
-    puts("Jellop current-only programme, authoritative categories and live ring regression checks passed");
+    c=parse(R"JSON({"Items":[{"Id":"abc","Name":"Blocked","JellopHealth":{"banned":true,"eligible":false,"hiatusUntil":0}}]})JSON");
+    assert(c.policy_state==LT_POLICY_BANNED && livetv_policy_excluded(&c));
+    c=parse(R"JSON({"Items":[{"Id":"abc","Name":"Cooldown","JellopHealth":{"banned":false,"eligible":false,"hiatusUntil":4102444800}}]})JSON");
+    assert(c.policy_state==LT_POLICY_HIATUS && c.policy_until_unix==4102444800u && livetv_policy_excluded(&c));
+    c=parse(R"JSON({"Items":[{"Id":"abc","JellopHealth":{"banned":false,"eligible":true,"hiatusUntil":0}}]})JSON");
+    assert(c.policy_state==LT_POLICY_ELIGIBLE && !livetv_policy_excluded(&c));
+    c=parse(R"JSON({"Items":[{"Id":"abc","JellopHealth":{"banned":true,"eligible":true,"hiatusUntil":0}}]})JSON");
+    assert(c.policy_state==LT_POLICY_UNKNOWN);
+    c=parse(R"JSON({"Items":[{"Id":"abc","JellopHealth":{"banned":"true","eligible":false,"hiatusUntil":0}}]})JSON");
+    assert(c.policy_state==LT_POLICY_UNKNOWN);
+    puts("Jellop current-only programme, policy, authoritative categories and live ring regression checks passed");
 }
