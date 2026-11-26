@@ -20,6 +20,7 @@ from config import DEFAULT
 TOKEN="fixture-token"
 USER="1"*32
 CHANNELS=["a"*32,"b"*32]
+EXCLUDED=["d"*32,"e"*32]
 RID="c"*32
 
 class Gateway(http.server.BaseHTTPRequestHandler):
@@ -42,14 +43,17 @@ class Gateway(http.server.BaseHTTPRequestHandler):
             return self.send_data({"ServerName":"Jellop CI fixture","Version":"10.11.0","Id":"f"*32})
         if self.headers.get("X-Emby-Token")!=TOKEN:return self.send_data({},401)
         now=int(time.time())
+        all_channels=CHANNELS+EXCLUDED
         programs=[{"Id":str(i+3)*32,"ChannelId":cid,"Name":"Fixture Film "+str(i+1)+" (2020)",
-                   "JealousfinProgramme":{"source":"provider-catalogue","observedAt":now}} for i,cid in enumerate(CHANNELS)]
+                   "JealousfinProgramme":{"source":"provider-catalogue","observedAt":now}} for i,cid in enumerate(all_channels)]
         if path=="/LiveTv/Channels":
             return self.send_data({"Items":[{"Id":cid,"Name":"Fixture "+str(i+1),"Number":str(i+1),
                 "Tags":["Sports" if i==0 else "Drama"],
-                "UserData":{"IsFavorite":False},"CurrentProgram":programs[i]} for i,cid in enumerate(CHANNELS)],
-                "JealousfinPolicy":{"revision":"sqlite-policy-v2","channels":{cid:{"banned":False,"hiatusUntil":0} for cid in CHANNELS}}})
-        if path=="/LiveTv/Programs":return self.send_data({"Items":programs})
+                "UserData":{"IsFavorite":False},"CurrentProgram":programs[i]} for i,cid in enumerate(all_channels)],
+                "JealousfinPolicy":{"revision":"sqlite-policy-v2","channels":{cid:{"banned":cid==EXCLUDED[0],"hiatusUntil":4102444800 if cid==EXCLUDED[1] else 0} for cid in all_channels}}})
+        if path=="/LiveTv/Programs":
+            selected=urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query).get("ChannelIds",[""])[0].split(",")
+            return self.send_data({"Items":[p for p in programs if not selected[0] or p["ChannelId"] in selected]})
         if path=="/LiveTv/Recordings":return self.send_data({"Items":[]})
         return self.send_data({},404)
     def do_POST(self):
@@ -99,6 +103,9 @@ def fixture():
                 path=urllib.parse.urlsplit(self.path).path
                 path=re.sub(r"[0-9a-f]{32}","<id>",path)
                 print("FIXTURE_HTTP",self.command,path,code,flush=True)
+                if self.command=="POST" and re.fullmatch(r"/Items/[0-9a-f]{32}/PlaybackInfo",urllib.parse.urlsplit(self.path).path):
+                    with b.lock:b.fixture_attempts.append((urllib.parse.urlsplit(self.path).path.split("/")[2],int(code)))
+        b.fixture_attempts=[]
         server.RequestHandlerClass=Trace
         threads=[threading.Thread(target=x.serve_forever,daemon=True) for x in (upstream,server)]
         for t in threads:t.start()

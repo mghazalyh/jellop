@@ -50,6 +50,9 @@ jobs:
         with:
           name: Jellop-RPCS3-candidate
           path: dist
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
       - name: Install graphical runtime dependencies
         run: |
           sudo apt-get update
@@ -102,7 +105,9 @@ jobs:
           test -s "$game/USRDIR/EBOOT.BIN"
           test -s "$game/PARAM.SFO"
           python3 -c 'from pathlib import Path; import sys; p=Path(sys.argv[1]); assert (p/"USRDIR/EBOOT.BIN").read_bytes()[:4] == b"SCE\0"; assert b"JELP30001" in (p/"PARAM.SFO").read_bytes()' "$game"
-      - name: Actual graphical playback and Surf transition
+      - name: Actual graphical playback and repeated Surf cycles from deployed media
+        env:
+          JELLOP_PUBLIC_FIXTURE: '1'
         run: |
           # Use the runner's own private IPv4 rather than guest loopback.
           # The fixture exists only in this ephemeral GitHub runner.

@@ -71,6 +71,7 @@ jobs:
           /tmp/test-brightness
           g++ -std=c++11 -Wall -Wextra -Werror -O2 port/test_views_json.cpp -o /tmp/test-views-json
           /tmp/test-views-json
+          python3 tools/test_surf_acceptance.py
       - name: Upstream Live TV and stream regressions
         working-directory: tests
         run: |

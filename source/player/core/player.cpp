@@ -1848,6 +1848,15 @@ void show_player_run(const JFItem *item, u32 resume_secs,
                 g_prog.evidence_capacity=decode_ring_cap();
                 __sync_synchronize();
                 g_prog.evidence_seq++;
+#if BUILD_FOR_RPCS3
+                if(surf_confirmed && evidence.frames>0){
+                    char programme[128],times[24];int pm;
+                    live_programme(&live_ch,live_utc,programme,sizeof programme,times,sizeof times,&pm);
+                    slog_state("JELLOP_LIVE_SAMPLE channel=%s frames=%u decoded_ms=%u stalls=%u free_kib=%u programme=%.95s",
+                               item->id,(unsigned)g_prog.evidence_frames,(unsigned)g_prog.evidence_ms,
+                               (unsigned)g_prog.evidence_stalls,(unsigned)g_prog.evidence_free,programme);
+                }
+#endif
                 evidence_published=now_lv;
             }
             if (BTN_PRESSED(l3) && !hud_menu_open() && !g_sys_overlay && surf_pool_valid) {

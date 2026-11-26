@@ -7,7 +7,8 @@ import re
 import signal
 import subprocess
 import time
-from rpcs3_fixture import fixture, TOKEN, USER, CHANNELS
+from rpcs3_fixture import fixture, TOKEN, USER, CHANNELS, EXCLUDED
+from surf_acceptance import evaluate
 
 def main():
     ap=argparse.ArgumentParser()
@@ -79,17 +80,18 @@ def main():
                     last_state=lines
                 if not guest_started and "MAIN_MENU_ENTER" in lines:
                     guest_started=True
-                    deadline=time.monotonic()+240
+                    deadline=time.monotonic()+330
                     print("Guest reached menu; starting separate playback watchdog",flush=True)
                 if any(x in lines for x in ("JELLOP_SMOKE_MARKER_ABSENT","JELLOP_SMOKE_INVALID_MARKER","JELLOP_SMOKE_CONFIG_MISMATCH")):
                     raise RuntimeError("Guest did not arm the fixture driver")
-                channels=re.findall(r"JELLOP_LIVE_CONFIRMED channel=([a-f0-9]{32}) frame=(\d+)",lines)
-                confirmed={cid for cid,n in channels if int(n)>0}
-                if config_verified and "JELLOP_SMOKE_CATALOGUE count=2" in lines and "JELLOP_SURF_DUE " in lines and set(CHANNELS)<=confirmed:
-                    after=lines[lines.rfind("JELLOP_LIVE_CONFIRMED"):]
-                    frames=[int(x) for x in re.findall(r"AVSYNC .*?frame=(\d+)",after)]
-                    if len(frames)>=2 and frames[-1]>frames[0]:
-                        (out/"result.json").write_text(json.dumps({"result":"passed","channels":sorted(confirmed),"second_channel_frames":frames},indent=2))
+                with b.lock:attempts=list(b.fixture_attempts)
+                if config_verified and "JELLOP_SMOKE_CATALOGUE count=2" in lines:
+                    result=evaluate(lines,CHANNELS,attempts)
+                    if result:
+                        result["excluded_channels"]=EXCLUDED
+                        result["public_fixture"]=os.environ.get("JELLOP_PUBLIC_FIXTURE")=="1"
+                        (out/"result.json").write_text(json.dumps(result,indent=2))
+                        print("Surf acceptance passed:",json.dumps({k:v for k,v in result.items() if k!="sessions"}),flush=True)
                         subprocess.run(["import","-window","root",str(out/"screen.png")],timeout=15,check=False)
                         return
                 time.sleep(1)

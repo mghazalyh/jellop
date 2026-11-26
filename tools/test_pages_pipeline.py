@@ -4,7 +4,8 @@ from pathlib import Path
 import subprocess
 import tempfile
 import urllib.request
-from rpcs3_fixture import fixture, TOKEN, USER, CHANNELS
+import urllib.error
+from rpcs3_fixture import fixture, TOKEN, USER, CHANNELS, EXCLUDED
 
 def main():
     with fixture() as b, tempfile.TemporaryDirectory() as d:
@@ -17,7 +18,11 @@ def main():
         rows=call("/LiveTv/Channels?Limit=25")["Items"]
         assert {r["Id"] for r in rows}==set(CHANNELS)
         assert {r["JellopGenreMask"] for r in rows}=={2,4}
-        assert call("/Jellop/ChannelPolicy")["Items"]==[]
+        assert {r["Id"] for r in call("/Jellop/ChannelPolicy")["Items"]}==set(EXCLUDED)
+        for cid in EXCLUDED:
+            try:call("/Items/"+cid+"/PlaybackInfo",b"{}")
+            except urllib.error.HTTPError as e:assert e.code==409
+            else:raise AssertionError("Excluded channel was opened")
         for cid in CHANNELS:
             info=call("/Items/"+cid+"/PlaybackInfo",b"{}")
             out=Path(d)/(cid+".ts")
