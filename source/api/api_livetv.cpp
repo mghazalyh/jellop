@@ -116,9 +116,19 @@ int jf_fetch_excluded_channels(JFChannel *out, int max, int *total_out) {
         buf[0]=0;
         const int status=http_request(HTTP_GET,url,NULL,g_token,buf,PAGE_BUF);
         if(status!=200){valid=false;break;}
+        const char *end=buf+strlen(buf), *root=skip_ws(buf,end);
+        const char *obj_end=object_end(root,end);
+        const char *items=obj_end?find_top_value(root,obj_end,"Items"):NULL;
+        const char *count=obj_end?find_top_value(root,obj_end,"TotalRecordCount"):NULL;
+        if(!items||*items!='['||!count||*count<'0'||*count>'9'){
+            valid=false;break;
+        }
+        const long long declared=read_json_int(count,obj_end,-1);
+        if(declared<0||declared>2048){valid=false;break;}
         bool truncated=false;
         int total=0;
         const int got=livetv_parse_channels(buf,(int)strlen(buf),out+n,want,&total,&truncated);
+        if(total!=declared){valid=false;break;}
         if(expected<0)expected=total;
         if(truncated||total!=expected||total<0||total>2048||got<0||got>want||
            got!=(total-n<want?total-n:want)){valid=false;break;}
