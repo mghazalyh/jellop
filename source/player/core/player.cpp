@@ -65,6 +65,8 @@
 #include "live_buffer.h"
 #include "live_watch.h"   // Live TV: when to ask for a fresh stream
 #include "surf_clock.h"
+#include "surf_preference.h"
+#include "jf_paths.h"
 #include "surf_state.h"
 #include "live_exclusions.h"
 #include "live_evidence.h"
@@ -1605,8 +1607,9 @@ void show_player_run(const JFItem *item, u32 resume_secs,
     LiveWatch live_w;
     live_watch_init(&live_w, timing_get_us());
     SurfClock surf_clock;
-    const unsigned configured_dwell=ps.source.jellop_dwell_seconds;
-    surf_clock_init(&surf_clock,configured_dwell>=15&&configured_dwell<=600?configured_dwell:60);
+    ps.surf_dwell_override=live?surf_dwell_load(jf_data_path("jellop_surf_interval.txt")):0;
+    unsigned applied_dwell_override=ps.surf_dwell_override;
+    surf_clock_init(&surf_clock,surf_dwell_effective(applied_dwell_override,ps.source.jellop_dwell_seconds));
     char surf_recorded[40] = "";
     int surf_last_frame = ps.frame_count;
     SurfPool surf_pool={};
@@ -1835,6 +1838,13 @@ void show_player_run(const JFItem *item, u32 resume_secs,
         bool        live_changed = false;
         if (live) {
             const u64 now_lv = timing_get_us();
+            if(applied_dwell_override!=ps.surf_dwell_override){
+                applied_dwell_override=ps.surf_dwell_override;
+                surf_clock_set_dwell(&surf_clock,surf_dwell_effective(applied_dwell_override,ps.source.jellop_dwell_seconds),now_lv,ps.frame_count);
+                surf_checkpoint.remaining=surf_clock_seconds(&surf_clock);
+                save_surf(now_lv);
+                slog_state("JELLOP_SURF_INTERVAL seconds=%u",surf_clock_seconds(&surf_clock));
+            }
             live_evidence_step(&evidence,now_lv,ps.frame_count,ps.paused||g_sys_overlay||live_target>=0);
             if(now_lv-evidence_published>=1000000ULL){
                 g_prog.evidence_seq++;
@@ -2006,11 +2016,9 @@ void show_player_run(const JFItem *item, u32 resume_secs,
                 g_prog.evidence_frames=g_prog.evidence_ms=g_prog.evidence_stalls=0;
                 __sync_synchronize();g_prog.evidence_seq++;
                 evidence_published=0;
-                const unsigned next_dwell=ps.source.jellop_dwell_seconds;
-                if(next_dwell>=15&&next_dwell<=600){
-                    surf_clock.dwell_us=(uint64_t)next_dwell*1000000ULL;
-                    if(surf_clock.remaining_us>surf_clock.dwell_us)surf_clock.remaining_us=surf_clock.dwell_us;
-                }
+                const unsigned next_dwell=surf_dwell_effective(ps.surf_dwell_override,ps.source.jellop_dwell_seconds);
+                surf_clock.dwell_us=(uint64_t)next_dwell*1000000ULL;
+                if(surf_clock.remaining_us>surf_clock.dwell_us)surf_clock.remaining_us=surf_clock.dwell_us;
                 if (live_changed) {
                     surf_clock_new_channel(&surf_clock,timing_get_us(),ps.frame_count);
                     surf_confirmed=false;

@@ -18,6 +18,9 @@
 #include "timing.h"
 #include "audio.h"           // audio_get_clock_us
 #include "audio_bitstream.h"
+#include "surf_preference.h"
+#include "jf_paths.h"
+#include "user_prefs.h"
 #include "autoskip.h"        // Skip Intros / Skip Credits
 #include "statsovl.h"        // Playback Statistics
 #include "../../build_config.h"   // ENABLE_PLAYER_STATS (relative: source/ is not on the -I path)
@@ -114,7 +117,7 @@ static void open_subs_menu(PlayerState *ps) {
 // Picture) hands over to it; a setting (Statistics, the skips) changes in place
 // and the menu stays open on it; Next / Previous end this playback.
 enum { OPT_CHAPTERS, OPT_TRACKS, OPT_PICTURE, OPT_STATS, OPT_NEXT, OPT_PREV,
-       OPT_SKIP_INTRO, OPT_SKIP_CREDITS, OPT_BRIGHTNESS, OPT_MUTE, OPT_LIVE_PAUSE, OPT_MAX };
+       OPT_SKIP_INTRO, OPT_SKIP_CREDITS, OPT_BRIGHTNESS, OPT_MUTE, OPT_LIVE_PAUSE, OPT_SURF_INTERVAL, OPT_MAX };
 static int         s_opt_kind[OPT_MAX];
 static const char *s_opt_items[OPT_MAX];
 static const char *s_opt_vals[OPT_MAX];
@@ -158,6 +161,18 @@ static void open_brightness(PlayerState *ps){
     }
     ps->menu_kind=PLAYER_MENU_BRIGHTNESS;
     hud_open_menu("Brightness (-20 to +10)",s_brightness_items,31,hud_video_brightness_get()+20);
+}
+
+static const char *const s_surf_interval_labels[]={
+    "Server default","15 seconds","30 seconds","1 minute","2 minutes","3 minutes",
+    "4 minutes","5 minutes","6 minutes","7 minutes","8 minutes","9 minutes","10 minutes"
+};
+static_assert(sizeof s_surf_interval_labels/sizeof s_surf_interval_labels[0]==SURF_DWELL_OPTION_COUNT,"interval menu mismatch");
+static void open_surf_interval(PlayerState *ps){
+    int selected=0;
+    for(unsigned i=0;i<SURF_DWELL_OPTION_COUNT;i++)if(SURF_DWELL_OPTIONS[i]==ps->surf_dwell_override)selected=(int)i;
+    ps->menu_kind=PLAYER_MENU_SURF_INTERVAL;
+    hud_open_menu("Surf interval",s_surf_interval_labels,(int)SURF_DWELL_OPTION_COUNT,selected);
 }
 
 void player_open_options(PlayerState *ps, int row) {
@@ -206,6 +221,9 @@ void player_open_options(PlayerState *ps, int row) {
         snprintf(s_opt_valbuf[n],sizeof s_opt_valbuf[n],"%s",audio_get_muted()?"On":"Off");n++;
     }
     if(ps->live){
+        s_opt_kind[n]=OPT_SURF_INTERVAL;s_opt_items[n]="Surf interval";
+        snprintf(s_opt_valbuf[n],sizeof s_opt_valbuf[n],"%s%u s",ps->surf_dwell_override?"":"Server: ",
+                 surf_dwell_effective(ps->surf_dwell_override,ps->source.jellop_dwell_seconds));n++;
         s_opt_kind[n]=OPT_LIVE_PAUSE;s_opt_items[n]=ps->paused?"Resume playback":"Pause playback";
         s_opt_valbuf[n][0]=0;n++;
     }
@@ -228,6 +246,7 @@ static HudAction options_select(PlayerState *ps, int sel) {
     case OPT_BRIGHTNESS: open_brightness(ps);return HUD_ACTION_NONE;
     case OPT_MUTE: audio_set_muted(!audio_get_muted());break;
     case OPT_LIVE_PAUSE: return HUD_ACTION_TOGGLE_PAUSE;
+    case OPT_SURF_INTERVAL: open_surf_interval(ps);return HUD_ACTION_NONE;
     case OPT_NEXT:      return HUD_ACTION_NEXT_ITEM;
     case OPT_PREV:      return HUD_ACTION_PREV_ITEM;
 #if ENABLE_PLAYER_STATS
@@ -297,6 +316,21 @@ HudAction player_handle_menu_action(PlayerState *ps, HudAction act) {
         if (ps->menu_kind == PLAYER_MENU_OPTIONS) return options_select(ps, sel);
         if(ps->menu_kind==PLAYER_MENU_BRIGHTNESS){
             if(sel>=0&&sel<31)hud_video_brightness_set(sel-20);
+            player_open_options(ps,0);return HUD_ACTION_NONE;
+        }
+        if(ps->menu_kind==PLAYER_MENU_SURF_INTERVAL){
+            if(sel>=0&&(unsigned)sel<SURF_DWELL_OPTION_COUNT){
+                const unsigned n=SURF_DWELL_OPTIONS[sel];
+                if(n!=ps->surf_dwell_override){
+                    if(surf_dwell_save(jf_data_path("jellop_surf_interval.txt"),n)){
+                        ps->surf_dwell_override=n;
+                        user_prefs_save_async();
+                    }else{
+                        plog("surf interval: preference write failed");
+                        chapters_banner("Could not save Surf interval");
+                    }
+                }
+            }
             player_open_options(ps,0);return HUD_ACTION_NONE;
         }
         if (ps->menu_kind == PLAYER_MENU_CHAPTERS) {
