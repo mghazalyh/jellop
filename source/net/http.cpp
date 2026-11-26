@@ -726,6 +726,12 @@ int http_request(int method, const char *url, const char *body,
     return status;
 }
 
+int http_userdata_mutation(int method, const char *url, const char *token,
+                           char *out, int out_size) {
+    if (method != HTTP_POST && method != HTTP_DELETE) return -1;
+    return http_request_once(method, url, "", token, out, out_size, NULL, false);
+}
+
 // A GET to a server that may not be ours (server_discovery.cpp): a 401 there
 // says nothing about our session, so it must not log the user out.
 int http_probe_get(const char *url, const char *token, char *out, int out_size) {

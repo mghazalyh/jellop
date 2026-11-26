@@ -21,6 +21,8 @@
 #include "surf_preference.h"
 #include "jf_paths.h"
 #include "user_prefs.h"
+#include "api_userdata.h"
+#include "livetv_list.h"
 #include "autoskip.h"        // Skip Intros / Skip Credits
 #include "statsovl.h"        // Playback Statistics
 #include "../../build_config.h"   // ENABLE_PLAYER_STATS (relative: source/ is not on the -I path)
@@ -117,7 +119,7 @@ static void open_subs_menu(PlayerState *ps) {
 // Picture) hands over to it; a setting (Statistics, the skips) changes in place
 // and the menu stays open on it; Next / Previous end this playback.
 enum { OPT_CHAPTERS, OPT_TRACKS, OPT_PICTURE, OPT_STATS, OPT_NEXT, OPT_PREV,
-       OPT_SKIP_INTRO, OPT_SKIP_CREDITS, OPT_BRIGHTNESS, OPT_MUTE, OPT_LIVE_PAUSE, OPT_SURF_INTERVAL, OPT_MAX };
+       OPT_SKIP_INTRO, OPT_SKIP_CREDITS, OPT_BRIGHTNESS, OPT_MUTE, OPT_LIVE_PAUSE, OPT_SURF_INTERVAL, OPT_FAVOURITE, OPT_MAX };
 static int         s_opt_kind[OPT_MAX];
 static const char *s_opt_items[OPT_MAX];
 static const char *s_opt_vals[OPT_MAX];
@@ -226,6 +228,14 @@ void player_open_options(PlayerState *ps, int row) {
                  surf_dwell_effective(ps->surf_dwell_override,ps->source.jellop_dwell_seconds));n++;
         s_opt_kind[n]=OPT_LIVE_PAUSE;s_opt_items[n]=ps->paused?"Resume playback":"Pause playback";
         s_opt_valbuf[n][0]=0;n++;
+        JFChannel channel;
+        const int at = ps->item ? xmb_livetv_index_of(ps->item->id) : -1;
+        if (at >= 0 && xmb_livetv_get(at, &channel)) {
+            s_opt_kind[n]=OPT_FAVOURITE;s_opt_items[n]=TR("Favourite");
+            snprintf(s_opt_valbuf[n],sizeof s_opt_valbuf[n],"%s",
+                     jf_favourite_async_pending() ? "Saving..." : channel.favourite ? TR("On") : TR("Off"));
+            n++;
+        }
     }
     for (int i = 0; i < n; i++) s_opt_vals[i] = s_opt_valbuf[i];
     s_opt_n = n;
@@ -247,6 +257,16 @@ static HudAction options_select(PlayerState *ps, int sel) {
     case OPT_MUTE: audio_set_muted(!audio_get_muted());break;
     case OPT_LIVE_PAUSE: return HUD_ACTION_TOGGLE_PAUSE;
     case OPT_SURF_INTERVAL: open_surf_interval(ps);return HUD_ACTION_NONE;
+    case OPT_FAVOURITE: {
+        JFChannel channel;
+        const int at = ps->item ? xmb_livetv_index_of(ps->item->id) : -1;
+        if (jf_favourite_async_pending()) chapters_banner("Favourite update pending");
+        else if (ps->live && at >= 0 && xmb_livetv_get(at, &channel) &&
+                 jf_favourite_async_start(channel.id, !channel.favourite))
+            chapters_banner("Saving favourite...");
+        else chapters_banner("Could not save favourite");
+        return HUD_ACTION_NONE;
+    }
     case OPT_NEXT:      return HUD_ACTION_NEXT_ITEM;
     case OPT_PREV:      return HUD_ACTION_PREV_ITEM;
 #if ENABLE_PLAYER_STATS
@@ -261,6 +281,11 @@ static HudAction options_select(PlayerState *ps, int sel) {
 }
 
 HudAction player_handle_menu_action(PlayerState *ps, HudAction act) {
+    if (ps->live) {
+        const int favourite = xmb_livetv_favourite_result();
+        if (favourite > 0) chapters_banner("Favourite updated");
+        else if (favourite < 0) chapters_banner("Could not save favourite");
+    }
     if (act == HUD_ACTION_MENU_SWITCH) {
         act = HUD_ACTION_NONE;
         if (ps->menu_kind == PLAYER_MENU_AUDIO && has_subs_menu(ps))       open_subs_menu(ps);

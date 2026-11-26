@@ -26,6 +26,21 @@ int main(void) {
     CHECK(r.method == HTTP_DELETE);
     CHECK(!strcmp(r.url, "http://10.0.0.5:8096/Users/u0123abcd/FavoriteItems/0123456789abcdef0123456789abcdef"));
 
+    // A queued request is a complete account-bound value: subsequent
+    // changes to another user's request cannot redirect the first one.
+    UserDataRequest queued = r;
+    CHECK(userdata_favourite_request(&r, "http://10.0.0.5:18797", "another-user", item, true));
+    CHECK(queued.method == HTTP_DELETE);
+    CHECK(!strcmp(queued.url, "http://10.0.0.5:8096/Users/u0123abcd/FavoriteItems/0123456789abcdef0123456789abcdef"));
+    CHECK(r.method == HTTP_POST);
+    CHECK(strstr(r.url, ":18797/Users/another-user/") != NULL);
+
+    // A bounded request must reject a URL that cannot fit.
+    char large_server[512];
+    memset(large_server, 'a', sizeof large_server - 1);
+    large_server[sizeof large_server - 1] = '\0';
+    CHECK(!userdata_favourite_request(&r, large_server, uid, item, true));
+
     // Played: the same shape on its own collection.
     CHECK(userdata_played_request(&r, srv, uid, item, true));
     CHECK(r.method == HTTP_POST && strstr(r.url, "/PlayedItems/") != NULL);

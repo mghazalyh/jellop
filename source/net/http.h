@@ -33,6 +33,10 @@ void http_net_unlock(void);
 int  http_probe_get(const char *url, const char *token, char *out, int out_size);
 int  http_request(int method, const char *url, const char *body,
                   const char *token, char *out, int out_size);
+// A queued user-data mutation may finish after the account has changed.
+// Its caller handles 401 only after checking the captured account identity.
+int http_userdata_mutation(int method, const char *url, const char *token,
+                           char *out, int out_size);
 
 // How long a request may wait for the server's first byte; 0 restores the
 // default 24 s.  Never lowers it below the default.
