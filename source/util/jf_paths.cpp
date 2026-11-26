@@ -38,7 +38,7 @@ static const char *const k_user_files[] = {
     "jellyfin_centermix.txt", "jellyfin_vquality.txt", "jellyfin_vq_items.txt",
     "jellyfin_autoskip.txt", "jellyfin_skip_intro.txt", "jellyfin_skip_credits.txt",
     "jellyfin_directstream.txt", "jellyfin_directplay.txt", "jellyfin_home_order.txt",
-    "jellyfin_livetv.txt", "jellop_surf.txt", "jellop_brightness.txt",
+    "jellyfin_livetv.txt", "jellop_surf.txt", "jellop_brightness.txt", "jellop_surf_interval.txt",
     "jellyfin_livetv_quality.txt", "jellyfin_livetv_buffer.txt", "jellyfin_livetv_onnow.txt",
     "jellyfin_picsize.txt",
     "jellyfin_aspect.txt", "jellyfin_volume.txt", "jellyfin_search_recent.txt",

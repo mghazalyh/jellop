@@ -24,7 +24,8 @@
 #define LP_IS_GENRE(k)  ((k) <= -100 && (k) > -164)
 #define LP_GENRE_OF(k)  (-100 - (k))
 #define LP_MAX_HIDDEN   32
-#define LP_MAX_RECENT   12
+#define LP_MAX_RECENT   30
+#define LP_RECENT_BATCH 6    // HTTP request path is only 512 bytes
 #define LP_ID_MAX       40
 
 typedef struct {
@@ -50,6 +51,8 @@ void lp_set_hidden(LtPrefs *p, int key, bool hidden);
 void lp_note_recent(LtPrefs *p, const char *id);
 // Position of `id` in the recent list (0 = newest), or LP_MAX_RECENT when absent.
 int  lp_recent_rank(const LtPrefs *p, const char *id);
+// Build a bounded &Ids= query for at most six IDs. Returns count or -1.
+int lp_recent_query_batch(const char ids[][LP_ID_MAX], int n, int first, char *out, int cap);
 
 // The pages to offer, in order, as keys: Favourites, Recently watched (only
 // when something was watched), then the categories (`bases`, ascending), each

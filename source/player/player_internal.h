@@ -88,7 +88,7 @@ void progress_thread_fn(void *arg);
 // Which popup menu the HUD is showing — decides what a
 // HUD_ACTION_MENU_SELECT applies to.
 enum { PLAYER_MENU_NONE, PLAYER_MENU_AUDIO, PLAYER_MENU_SUBS, PLAYER_MENU_CHAPTERS,
-       PLAYER_MENU_OPTIONS, PLAYER_MENU_BRIGHTNESS };
+       PLAYER_MENU_OPTIONS, PLAYER_MENU_BRIGHTNESS, PLAYER_MENU_SURF_INTERVAL };
 
 // R2/L2 tap/hold seek input state (core/player_seek.cpp).
 enum { SEEK_IDLE, SEEK_PRESS, SEEK_SCRUB };
@@ -148,6 +148,7 @@ struct PlayerState {
     // A Live TV channel: no length, no seeking, a fresh stream on every
     // reopen.  `item` is the channel and changes when the channel does.
     bool     live;
+    unsigned surf_dwell_override; // zero = bridge/server default
     volatile bool stream_ended;  // live: the decode thread reached the end
     bool     open_cancelled;     // the last reopen ended because the user pressed O
     bool     live_no_copy;       // live: the server refused a copy; re-encode this session

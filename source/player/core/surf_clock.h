@@ -21,6 +21,13 @@ static inline void surf_clock_rebase(SurfClock *c,uint64_t now,int frame) {
 static inline void surf_clock_new_channel(SurfClock *c,uint64_t now,int frame) {
     c->remaining_us=c->dwell_us;surf_clock_rebase(c,now,frame);
 }
+// Explicit interval changes restart the dwell, preserving running/paused/off.
+static inline void surf_clock_set_dwell(SurfClock *c,unsigned seconds,uint64_t now,int frame) {
+    if(seconds<15)seconds=15;
+    if(seconds>600)seconds=600;
+    c->dwell_us=(uint64_t)seconds*1000000ULL;
+    surf_clock_new_channel(c,now,frame);
+}
 static inline void surf_clock_toggle(SurfClock *c,uint64_t now,int frame) {
     if (c->mode==SURF_OFF) c->remaining_us=c->dwell_us;
     c->mode=c->mode==SURF_RUNNING ? SURF_PAUSED : SURF_RUNNING;

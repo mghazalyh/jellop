@@ -216,12 +216,30 @@ void worker_main(void *) {
             } else if (j.mode == 2) {
                 if (j.n_recent <= 0) { n = 0; }
                 else {
-                    char extra[LP_MAX_RECENT * (LP_ID_MAX + 1) + 8] = "&Ids=";
-                    for (int i = 0; i < j.n_recent; i++) {
-                        if (i) strcat(extra, ",");
-                        strcat(extra, j.recent[i]);
+                    n=0;
+                    // Keep every request below the native 512-byte path cap.
+                    // Reuse the existing worker buffer; at most five requests
+                    // for all thirty history entries, no extra resident list.
+                    for(int first=0;first<j.n_recent;){
+                        char extra[LP_RECENT_BATCH*(LP_ID_MAX+1)+8];
+                        int batch=lp_recent_query_batch(j.recent,j.n_recent,first,extra,sizeof extra);
+                        if(batch<=0){n=-1;break;}
+                        int got=jf_fetch_channels_range(w_ch+n,batch,0,batch,NULL,NULL,extra);
+                        if(got<0||got>batch){n=-1;break;}
+                        bool valid=true;
+                        for(int i=0;i<got;i++){
+                            bool match=false;
+                            for(int r=first;r<first+batch;r++)
+                                if(!strcmp(w_ch[n+i].id,j.recent[r])){match=true;break;}
+                            if(!match){valid=false;break;}
+                            for(int prior=0;prior<n+i;prior++)
+                                if(!strcmp(w_ch[prior].id,w_ch[n+i].id)){valid=false;break;}
+                            if(!valid)break;
+                        }
+                        if(!valid){n=-1;break;}
+                        n+=got;first+=batch;
                     }
-                    n = jf_fetch_channels_range(w_ch, MAX_CH, 0, MAX_CH, &total, NULL, extra);
+                    total=n;
                     // Newest watched first (the server answers in its own order).
                     for (int a = 1; a < n; a++) {
                         int ra = LP_MAX_RECENT;
