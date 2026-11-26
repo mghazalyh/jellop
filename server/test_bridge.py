@@ -53,4 +53,39 @@ class BridgeTests(unittest.TestCase):
         self.assertEqual(b.dispatch("GET","/LiveTv/Channels",{},{"X-Emby-Token":TOKEN},None)["Items"][0]["CurrentProgram"]["Name"],"Movie")
         with self.assertRaises(Failure):b.dispatch("GET","/unsupported",{},{"X-Emby-Token":TOKEN},None)
 
+    def test_insights_account_scope_and_unknown_policy(self):
+        b=Bridge("http://gateway",require_policy=False)
+        b.upstream=Mock(return_value={"Items":[{"Id":CID,"Name":"Channel"}]})
+        b.stream_started(TOKEN,CID,OTHER)
+        b.stream_started("another-account",OTHER,CID)
+        with b.lock:
+            b.evidence[(TOKEN,CID,OTHER)]["last"]={"FreeKiB":4096,"Stalls":2}
+            b.evidence[(TOKEN,CID,OTHER)]["outcome"]="transcode-output-timeout"
+            b.evidence[("another-account",OTHER,CID)]["last"]={"FreeKiB":1,"Stalls":99}
+        result=b.dispatch("GET","/Jellop/Insights",{},{"X-Emby-Token":TOKEN},None)["JellopInsights"]
+        self.assertEqual(result["PolicyKnown"],0)
+        self.assertEqual(result["TotalChannels"],1)
+        self.assertEqual(result["Eligible"],0)
+        self.assertEqual(result["Sessions"],1)
+        self.assertEqual(result["ObservedSessions"],1)
+        self.assertEqual(result["StalledSessions"],1)
+        self.assertEqual(result["TransportFaultSessions"],1)
+        self.assertEqual(result["MinReportedFreeKiB"],4096)
+        self.assertEqual(result["ConfigRevision"],1)
+        self.assertNotIn(TOKEN,str(result))
+        empty=b.insights("third-account")["JellopInsights"]
+        self.assertEqual(empty["Sessions"],0)
+        self.assertEqual(empty["MinReportedFreeKiB"],0)
+
+    def test_insights_authoritative_policy_counts(self):
+        b=Bridge("http://gateway",require_policy=True)
+        b.catalogue=Mock(return_value=[
+            {"JellopHealth":{"banned":True,"hiatusUntil":4102444800}},
+            {"JellopHealth":{"banned":False,"hiatusUntil":4102444800}},
+            {"JellopHealth":{"banned":False,"hiatusUntil":0}}])
+        result=b.insights(TOKEN)["JellopInsights"]
+        self.assertEqual(result["PolicyKnown"],1)
+        self.assertEqual((result["Eligible"],result["Hiatus"],result["Banned"]),(1,1,1))
+        b.catalogue.assert_called_once_with(TOKEN,fresh=True,include_excluded=True)
+
 if __name__=="__main__":unittest.main()

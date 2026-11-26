@@ -15,7 +15,10 @@ def main():
     ap.add_argument("--emulator",required=True)
     ap.add_argument("--root",required=True,type=Path)
     ap.add_argument("--output",required=True,type=Path)
+    ap.add_argument("--transitions",type=int,default=4,help="Even number of automatic transitions, 4-24")
     args=ap.parse_args()
+    if not 4<=args.transitions<=24 or args.transitions%2:
+        ap.error("--transitions must be even and between 4 and 24")
     root=args.root.resolve()
     out=args.output.resolve();out.mkdir(parents=True,exist_ok=True)
     hdd=root/"dev_hdd0"
@@ -94,7 +97,7 @@ def main():
                     last_state=lines
                 if not guest_started and "MAIN_MENU_ENTER" in lines:
                     guest_started=True
-                    deadline=time.monotonic()+330
+                    deadline=time.monotonic()+max(330,args.transitions*35+90)
                     print("Guest reached menu; starting separate playback watchdog",flush=True)
                 if any(x in lines for x in ("JELLOP_SMOKE_MARKER_ABSENT","JELLOP_SMOKE_INVALID_MARKER","JELLOP_SMOKE_CONFIG_MISMATCH")):
                     raise RuntimeError("Guest did not arm the fixture driver")
@@ -102,7 +105,7 @@ def main():
                 events,favourites=b.fixture_favourite_snapshot()
                 controls=evaluate_controls(lines,events,favourites,CHANNELS[0])
                 if config_verified and "JELLOP_SMOKE_CATALOGUE count=2" in lines:
-                    result=evaluate(lines,CHANNELS,attempts)
+                    result=evaluate(lines,CHANNELS,attempts,transitions=args.transitions)
                     if result and controls:
                         result["controls"]=controls
                         result["excluded_channels"]=EXCLUDED

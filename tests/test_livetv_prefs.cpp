@@ -5,6 +5,7 @@
 #include <string.h>
 
 #include "livetv_prefs.h"
+#include "recent_history.h"
 
 static int s_checks = 0, s_failed = 0;
 #define CHECK(cond) do { s_checks++; if (!(cond)) { s_failed++; \
@@ -188,7 +189,38 @@ static void genres(void) {
     CHECK(lp_build_pages(&p, BASES, 2, out, 16) == lp_build_pages_ex(&p, BASES, 2, NULL, 0, out, 16));
 }
 
+static void scoped_history(){
+    RecentHistory h={},restored={};
+    LtPrefs a,b,c;lp_init(&a);lp_init(&b);lp_init(&c);
+    for(int i=0;i<30;i++){
+        char id[40];snprintf(id,sizeof id,"english-%02d",i);lp_note_recent(&a,id);
+        snprintf(id,sizeof id,"malay-%02d",i);lp_note_recent(&b,id);
+    }
+    CHECK(history_put(&h,1,&a));
+    CHECK(history_put(&h,2,&b));
+    CHECK(history_get(&h,1,&c)&&c.n_recent==30&&!strcmp(c.recent[0],"english-29"));
+    CHECK(history_get(&h,2,&c)&&c.n_recent==30&&!strcmp(c.recent[0],"malay-29"));
+    CHECK(!history_get(&h,3,&c)&&c.n_recent==0);
+    char text[RECENT_HISTORY_FILE_MAX];
+    CHECK(history_format(&h,text,sizeof text)>0);
+    CHECK(history_parse(text,&restored));
+    CHECK(history_get(&restored,1,&c)&&c.n_recent==30);
+    CHECK(history_get(&restored,2,&c)&&c.n_recent==30);
+    CHECK(history_put(&h,1,&a)); // touch English; evict the other scope
+    lp_init(&c);lp_note_recent(&c,"third-account");
+    CHECK(history_put(&h,3,&c));
+    CHECK(!history_get(&h,2,&c)&&c.n_recent==0);
+    CHECK(history_get(&h,1,&c)&&c.n_recent==30);
+    CHECK(!history_parse("1 0000000000000001 abc abc\n",&restored));
+    CHECK(!history_parse("1 0000000000000001 abc\n1 0000000000000001 xyz\n",&restored));
+    CHECK(!history_parse("1 0000000000000001 bad/id\n",&restored));
+    CHECK(!history_parse("1 0000000000000001 abc",&restored));
+    CHECK(history_get(&restored,2,&c)&&c.n_recent==30); // failed parse is atomic
+    CHECK(history_format(&h,text,8)<0);
+}
+
 int main() {
+    scoped_history();
     hidden();
     genres();
     recent();

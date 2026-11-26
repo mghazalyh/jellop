@@ -1,19 +1,37 @@
 import unittest
 from surf_acceptance import evaluate, evaluate_controls
 A="a"*32;B="b"*32
-def fixture():
+def fixture(transitions=4):
     lines=[];attempts=[]
-    for i,cid in enumerate([A,B,A,B,A]):
+    for i,cid in enumerate([A if i%2==0 else B for i in range(transitions+1)]):
         attempts.append((cid,200))
         lines.append(f"JELLOP_LIVE_CONFIRMED channel={cid} frame={i+1}")
         for sec in (1,3,15):
             lines.append(f"JELLOP_LIVE_SAMPLE channel={cid} frames={sec*30} decoded_ms={sec*1000} stalls=0 free_kib=12000 programme=Fixture Film {1 if cid==A else 2} (2020)")
-        if i<4:lines.append(f"JELLOP_SURF_DUE from={cid} to={B if cid==A else A} cycle={1+(i+1)//2}")
+        if i<transitions:lines.append(f"JELLOP_SURF_DUE from={cid} to={B if cid==A else A} cycle={1+(i+1)//2}")
     return "\n".join(lines),attempts
 class AcceptanceTest(unittest.TestCase):
     def test_complete(self):
         lines,attempts=fixture()
         self.assertEqual(len(evaluate(lines,[A,B],attempts)["sessions"]),5)
+    def test_endurance(self):
+        lines,attempts=fixture(20)
+        result=evaluate(lines,[A,B],attempts,transitions=20)
+        self.assertEqual(result["completed_cycles"],10)
+        self.assertEqual(len(result["sessions"]),21)
+        self.assertEqual(result["guest_memory_drop_kib"],0)
+    def test_low_memory(self):
+        lines,attempts=fixture()
+        with self.assertRaises(RuntimeError):evaluate(lines.replace("free_kib=12000","free_kib=8191"),[A,B],attempts)
+    def test_memory_drift(self):
+        lines,attempts=fixture()
+        chunks=lines.splitlines()
+        chunks[:4]=[s.replace("free_kib=12000","free_kib=18000") for s in chunks[:4]]
+        with self.assertRaises(RuntimeError):evaluate("\n".join(chunks),[A,B],attempts)
+    def test_invalid_transition_budget(self):
+        lines,attempts=fixture()
+        for n in (0,3,5,26):
+            with self.assertRaises(ValueError):evaluate(lines,[A,B],attempts,transitions=n)
     def test_missing_rollover(self):
         lines,attempts=fixture()
         self.assertIsNone(evaluate("\n".join(lines.splitlines()[:10]),[A,B],attempts[:2]))

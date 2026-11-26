@@ -18,6 +18,7 @@
 #include "ui_sfx.h"          // the menu sounds
 #include "thumbnail_cache.h"
 #include "jellyfin_api.h"
+#include "jellop_profiles.h"
 #include "ui_buffering.h"
 #include "player.h"
 #include "music_screen.h"
@@ -337,10 +338,22 @@ static bool xmb_input_settings(void) {
     if (g_settings_confirm) {
         // Modal confirm: swallow all other input until resolved.
         if (BTN_PRESSED(cross)) {
+            if(jf_profile_requested()>=0){
+                if(jf_profile_schedule_switch()){
+                    // Clean application teardown joins the old gateway's
+                    // workers and frees its caches. The next boot applies
+                    // the chosen endpoint before any authenticated request.
+                    running=0;
+                    return true;
+                }
+                jf_profile_cancel();g_settings_confirm=false;
+                xmb_dl_notice("Gateway profile","Could not persist the gateway switch.");
+                return false;
+            }
             jellyfin_logout();
             return true;   // exit the XMB; main loop returns to the login screen
         }
-        if (BTN_PRESSED(circle)) g_settings_confirm = false;
+        if (BTN_PRESSED(circle)) {jf_profile_cancel();g_settings_confirm = false;}
         return false;
     }
     if (BTN_PRESSED(l1)) { xmb_switch_tab(xmb_next_enabled(g_active_tab, -1)); return false; }

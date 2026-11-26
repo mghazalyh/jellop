@@ -9,6 +9,7 @@
 
 #include "jellyfin_api.h"
 #include "auth_data.h"
+#include "jellop_profiles.h"
 #include "ui.h"
 #include "ui_visuals.h"
 #include "timing.h"
@@ -301,6 +302,7 @@ void jf_login_set_shared(bool on) {
 
 void save_config(void) {
     load_once();
+    if(g_token[0]&&g_userid[0])jf_profile_login_completed();
     if (!s_store_ok || !store_write(true, s_device_id)) file_save();
     FILE *f = fopen(jf_data_path(SERVER_FILE), "w");
     if (f) { fprintf(f, "%s\n", g_server); fclose(f); }
@@ -327,6 +329,25 @@ static void remove_config(void) {
 
 int load_config(void) {
     load_once();
+    // A requested gateway change is applied before any account-dependent
+    // worker is started. Never forward a saved or borrowed token to a
+    // different gateway. Re-authentication uses the normal login path.
+    const char *target=jf_profile_boot_target();
+    if(target[0]&&strcmp(target,g_server)){
+        if(s_borrowed){
+            s_borrowed=false;
+            snprintf(s_device_id,sizeof s_device_id,"%s",s_own_device);
+        }
+        memset(g_token,0,sizeof g_token);
+        memset(g_userid,0,sizeof g_userid);
+        memset(g_username,0,sizeof g_username);
+        snprintf(g_server,sizeof g_server,"%s",target);
+        g_auth_expired=false;
+        plog("profiles: new gateway requires sign-in");
+    }else if(target[0]&&g_token[0]&&g_userid[0]){
+        jf_profile_login_completed();
+        user_prefs_save_async();
+    }
     return g_token[0] ? 1 : 0;
 }
 

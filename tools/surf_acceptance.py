@@ -6,6 +6,8 @@ DUE=re.compile(r"JELLOP_SURF_DUE from=([a-f0-9]{32}) to=([a-f0-9]{32}) cycle=(\d
 SAMPLE=re.compile(r"JELLOP_LIVE_SAMPLE channel=([a-f0-9]{32}) frames=(\d+) decoded_ms=(\d+) stalls=(\d+) free_kib=(\d+) programme=(.*)$")
 
 def evaluate(lines,channels,attempts,transitions=4):
+    if type(transitions) is not int or not 4<=transitions<=24 or transitions%2:
+        raise ValueError("Acceptance requires 4-24 even transitions")
     expected=set(channels)
     if len(expected)!=2:raise ValueError("Expected two-channel fixture")
     if any(cid not in expected or status!=200 for cid,status in attempts):
@@ -48,9 +50,20 @@ def evaluate(lines,channels,attempts,transitions=4):
             raise RuntimeError("Nonmonotonic native evidence")
     if [x[0] for x in attempts]!=[s["channel"] for s in sessions]:return None
     samples=[x for s in sessions for x in s["samples"]]
+    free=[x["free_kib"] for x in samples]
+    minimum,maximum=min(free),max(free)
+    # A zero guest measurement is unknown, not proof of memory headroom.
+    # Keep the existing 8 MiB reserve and reject a >4 MiB sustained drop
+    # between the first and last confirmed session of the same channel.
+    initial=min(x["free_kib"] for x in sessions[0]["samples"])
+    final=min(x["free_kib"] for x in sessions[transitions]["samples"])
+    if minimum<8192:raise RuntimeError("Guest free-memory reserve breached")
+    if initial-final>4096 or maximum-minimum>8192:
+        raise RuntimeError("Guest memory drift exceeds acceptance budget")
     return {"result":"passed","sessions":sessions,"transitions":switches,
-        "minimum_free_kib":min(x["free_kib"] for x in samples),
-        "maximum_free_kib":max(x["free_kib"] for x in samples),
+        "completed_cycles":transitions//2,"minimum_free_kib":minimum,
+        "maximum_free_kib":maximum,"first_session_minimum_free_kib":initial,
+        "final_session_minimum_free_kib":final,"guest_memory_drop_kib":max(0,initial-final),
         "decoded_stalls":sum(x["stalls"] for x in samples)}
 
 

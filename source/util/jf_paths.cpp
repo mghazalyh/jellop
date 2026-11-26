@@ -30,6 +30,7 @@
 // system (Audio Output), downloads, the server's MAC, logging and the
 // developer switches -- is the console's.
 static const char *const k_user_files[] = {
+    "jellop_profiles.txt", "jellop_history.txt",
     "jellyfin_theme.txt", "jellyfin_layout.txt", "jellyfin_language.txt",
     "jellyfin_daynight.txt", "jellyfin_wavereact.txt", "jellyfin_menusnow.txt",
     "jellyfin_visualiser.txt", "jellyfin_visualizer.txt", "jellyfin_jellydrop.txt",
