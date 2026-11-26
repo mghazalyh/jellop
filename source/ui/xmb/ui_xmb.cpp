@@ -760,7 +760,7 @@ void ui_run_xmb(void) {
         static int smoke = -1;
         if (smoke < 0) {
             smoke = 0;
-            FILE *f = fopen(JELLOP_TMP_DIR "/jellop_smoke.txt", "r");
+            FILE *f = fopen(jf_shared_data_path("jellop_smoke.txt"), "r");
             if (f) {
                 char line[32] = "",endpoint[128]="";
                 if (fgets(line,sizeof line,f) && !strcmp(line,"fixture-surf-v1\n")
@@ -771,17 +771,26 @@ void ui_run_xmb(void) {
                     }else slog_state("JELLOP_SMOKE_CONFIG_MISMATCH");
                 }
                 fclose(f);
-            }
+                if(smoke==0)slog_state("JELLOP_SMOKE_INVALID_MARKER");
+            }else slog_state("JELLOP_SMOKE_MARKER_ABSENT");
         }
         if (smoke == 1) {
             for (int t=0;t<XMB_TAB_COUNT;t++) if(g_tabs[t].enabled && xmb_kind(t)==TABKIND_LIVETV) {
                 if(g_active_tab!=t) xmb_switch_tab(t);
+                spine_set_level(2);
                 smoke=2;
                 slog_state("JELLOP_SMOKE_LIVETV");
                 break;
             }
-        } else if (smoke == 2 && xmb_kind(g_active_tab)==TABKIND_LIVETV) {
-            if (xmb_livetv_smoke_start()) smoke=3;
+        } else if (smoke == 2) {
+            // Classic mode may return Home during the animated entry.
+            // Keep the normal Live TV tab selected until the animation settles.
+            for(int t=0;t<XMB_TAB_COUNT;t++) if(g_tabs[t].enabled && xmb_kind(t)==TABKIND_LIVETV){
+                if(g_active_tab!=t)xmb_switch_tab(t);
+                spine_set_level(2);
+                if(xmb_livetv_smoke_start())smoke=3;
+                break;
+            }
         }
 #endif
         tab = g_active_tab; // navigation may have opened a different Classic page

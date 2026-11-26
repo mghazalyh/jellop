@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - 'tools/pages_fixture.py'
+      - 'tools/fetch_pages_asset.mjs'
       - 'tools/test_pages_pipeline.py'
       - 'tools/rpcs3_fixture.py'
       - 'server/**'
@@ -17,6 +18,9 @@ jobs:
     timeout-minutes: 12
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
       - name: Prepare media tools
         run: |
           if ! command -v ffmpeg >/dev/null; then

@@ -1114,6 +1114,7 @@ void xmb_livetv_record_played(const char *id) {
 
 #if BUILD_FOR_RPCS3
 bool xmb_livetv_smoke_start(void) {
+    tick(); // identical render-thread catalogue pump, once per frame
     if (!s_loaded || s_n < 2) return false;
     slog_state("JELLOP_SMOKE_CATALOGUE count=%d",s_n);
     s_surf_requested=true;

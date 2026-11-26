@@ -31,7 +31,8 @@ def main():
     (game/"jellyfin_config.txt").write_text(endpoint+"\nfixture\n"+TOKEN+"\n"+USER+"\n")
     (game/"jellyfin_updatecheck.txt").write_text("0\n")
     (game/"jellyfin_bootanim.txt").write_text("0\n")
-    (tmp/"jellop_smoke.txt").write_text("fixture-surf-v1\n"+endpoint+"\n")
+    marker=game/"jellop_smoke.txt"
+    marker.write_text("fixture-surf-v1\n"+endpoint+"\n")
     state=tmp/"jf_state.log"
     config=out/"rpcs3-config.yml"
     config.write_text("Video:\n  Renderer: OpenGL\n  Write Color Buffers: true\n  Read Color Buffers: true\nAudio:\n  Renderer: \"Null\"\n  Music Handler: \"Null\"\nInput/Output:\n  Camera: \"Null\"\nNet:\n  Internet enabled: Connected\n  Bind address: 0.0.0.0\n")
@@ -50,7 +51,8 @@ def main():
             print("Host preflight verified fixture discovery and native authorization",flush=True)
             proc=subprocess.Popen([args.emulator,"--no-gui","--config",str(config),str(boot)],
                 stdout=log,stderr=subprocess.STDOUT,env=env,start_new_session=True)
-            deadline=time.monotonic()+300
+            deadline=time.monotonic()+480
+            guest_started=False
             last_state=""
             config_verified=False
             while time.monotonic()<deadline:
@@ -75,6 +77,12 @@ def main():
                 if lines!=last_state:
                     print(lines[len(last_state):] if lines.startswith(last_state) else lines[-4000:],flush=True)
                     last_state=lines
+                if not guest_started and "MAIN_MENU_ENTER" in lines:
+                    guest_started=True
+                    deadline=time.monotonic()+240
+                    print("Guest reached menu; starting separate playback watchdog",flush=True)
+                if any(x in lines for x in ("JELLOP_SMOKE_MARKER_ABSENT","JELLOP_SMOKE_INVALID_MARKER","JELLOP_SMOKE_CONFIG_MISMATCH")):
+                    raise RuntimeError("Guest did not arm the fixture driver")
                 channels=re.findall(r"JELLOP_LIVE_CONFIRMED channel=([a-f0-9]{32}) frame=(\d+)",lines)
                 confirmed={cid for cid,n in channels if int(n)>0}
                 if config_verified and "JELLOP_SMOKE_CATALOGUE count=2" in lines and "JELLOP_SURF_DUE " in lines and set(CHANNELS)<=confirmed:
@@ -85,7 +93,7 @@ def main():
                         subprocess.run(["import","-window","root",str(out/"screen.png")],timeout=15,check=False)
                         return
                 time.sleep(1)
-            raise RuntimeError("Timed out waiting for catalogue, decoded playback and actual Surf transition")
+            raise RuntimeError("Timed out: "+("guest menu reached; missing catalogue or playback evidence" if guest_started else "guest did not reach main menu"))
         finally:
             if not (out/"screen.png").exists():
                 try:subprocess.run(["import","-window","root",str(out/"failure-screen.png")],timeout=15,check=False)
@@ -95,6 +103,7 @@ def main():
                 try:proc.wait(timeout=10)
                 except subprocess.TimeoutExpired:
                     os.killpg(proc.pid,signal.SIGKILL);proc.wait()
+            marker.unlink(missing_ok=True)
             for src in (state,tmp/"crash_log.txt",tmp/"player_log.txt",rpcs3_log):
                 if src.is_file():
                     with src.open("rb") as f:

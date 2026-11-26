@@ -3,15 +3,21 @@ import hashlib
 import json
 from pathlib import Path
 import re
-import urllib.request
+import subprocess
 
 BASE="https://jealouswin.pages.dev/jellop-test/v1/"
-def get(name,limit):
-    with urllib.request.urlopen(BASE+name,timeout=30) as r:
-        if not r.geturl().startswith(BASE):raise RuntimeError("Unexpected fixture redirect")
-        raw=r.read(limit+1)
-    if len(raw)>limit:raise RuntimeError("Fixture asset exceeds limit")
-    return raw
+RELEASE="ea578eee370198da46abc02b617027ea544696b2"
+def get(name,limit,release=RELEASE):
+    if name not in ("manifest.json","fixture.m3u8") and not re.fullmatch(r"seg\d{3}\.ts",name):
+        raise RuntimeError("Invalid fixture asset name")
+    if not re.fullmatch(r"[a-f0-9]{40}",release):raise RuntimeError("Invalid fixture revision")
+    # Same Node fetch stack and release query as Jealouswin's verified deployment.
+    helper=Path(__file__).with_name("fetch_pages_asset.mjs")
+    result=subprocess.run(["node",str(helper),BASE+name+"?release="+release+"&verify=0",str(limit)],capture_output=True,timeout=40)
+    if result.returncode:
+        raise RuntimeError("Public fixture fetch failed: "+result.stderr.decode(errors="replace")[-500:])
+    if len(result.stdout)>limit:raise RuntimeError("Fixture asset exceeds limit")
+    return result.stdout
 
 def download(root,rid):
     data=json.loads(get("manifest.json",32768))
@@ -27,7 +33,7 @@ def download(root,rid):
         if type(n) is not int or not 0<n<4*1024*1024:raise RuntimeError("Invalid asset size")
         total+=n
         if total>32*1024*1024:raise RuntimeError("Fixture too large")
-        raw=get(name,n)
+        raw=get(name,n,data["release"])
         if len(raw)!=n or hashlib.sha256(raw).hexdigest()!=entry.get("sha256"):raise RuntimeError("Fixture digest mismatch")
         (root/(rid+".m3u8" if name=="fixture.m3u8" else name)).write_bytes(raw)
     playlist=(root/(rid+".m3u8")).read_text()
