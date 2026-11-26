@@ -1884,6 +1884,9 @@ void show_player_run(const JFItem *item, u32 resume_secs,
                 xmb_livetv_record_played(item->id);
                 slog_state("JELLOP_LIVE_CONFIRMED channel=%s frame=%d",item->id,ps.frame_count);
             }
+#if BUILD_FOR_RPCS3
+            if(surf_confirmed)player_smoke_favourite_tick(&ps,evidence.frames);
+#endif
             surf_last_frame=ps.frame_count;
             const bool due = surf_clock_step(&surf_clock,now_lv,ps.frame_count,
                 ps.paused || g_sys_overlay || hud_menu_open() || live_target>=0);

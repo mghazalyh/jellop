@@ -47,9 +47,11 @@ class Gateway(http.server.BaseHTTPRequestHandler):
         programs=[{"Id":str(i+3)*32,"ChannelId":cid,"Name":"Fixture Film "+str(i+1)+" (2020)",
                    "JealousfinProgramme":{"source":"provider-catalogue","observedAt":now}} for i,cid in enumerate(all_channels)]
         if path=="/LiveTv/Channels":
+            with self.server.favourite_lock:
+                favourites=set(self.server.favourites)
             return self.send_data({"Items":[{"Id":cid,"Name":"Fixture "+str(i+1),"Number":str(i+1),
                 "Tags":["Sports" if i==0 else "Drama"],
-                "UserData":{"IsFavorite":False},"CurrentProgram":programs[i]} for i,cid in enumerate(all_channels)],
+                "UserData":{"IsFavorite":cid in favourites},"CurrentProgram":programs[i]} for i,cid in enumerate(all_channels)],
                 "JealousfinPolicy":{"revision":"sqlite-policy-v2","channels":{cid:{"banned":cid==EXCLUDED[0],"hiatusUntil":4102444800 if cid==EXCLUDED[1] else 0} for cid in all_channels}}})
         if path=="/LiveTv/Programs":
             selected=urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query).get("ChannelIds",[""])[0].split(",")
@@ -64,6 +66,8 @@ class Gateway(http.server.BaseHTTPRequestHandler):
         if path=="/Users/AuthenticateByName":
             return self.send_data({"AccessToken":TOKEN,"User":{"Id":USER,"Name":"fixture"}})
         if self.headers.get("X-Emby-Token")!=TOKEN:return self.send_data({},401)
+        if path.startswith("/Users/"+USER+"/FavoriteItems/"):
+            return self.mutate_favourite(path,True)
         for cid in CHANNELS:
             if path=="/Items/"+cid+"/PlaybackInfo":
                 import uuid
@@ -71,6 +75,20 @@ class Gateway(http.server.BaseHTTPRequestHandler):
                     "MediaSources":[{"TranscodingUrl":"/media/"+TOKEN+"/"+RID+".m3u8"}]})
         if path.startswith("/Sessions/") or path=="/LiveStreams/Close":return self.send_data({})
         return self.send_data({},404)
+
+    def mutate_favourite(self,path,value):
+        cid=path.rsplit("/",1)[-1]
+        if path!="/Users/"+USER+"/FavoriteItems/"+cid or cid not in CHANNELS:
+            return self.send_data({},404)
+        with self.server.favourite_lock:
+            if value:self.server.favourites.add(cid)
+            else:self.server.favourites.discard(cid)
+            self.server.favourite_events.append((cid,value))
+        return self.send_data({})
+
+    def do_DELETE(self):
+        if self.headers.get("X-Emby-Token")!=TOKEN:return self.send_data({},401)
+        return self.mutate_favourite(urllib.parse.urlsplit(self.path).path,False)
 
 @contextlib.contextmanager
 def fixture():
@@ -86,6 +104,9 @@ def fixture():
                 "-c:a","aac","-f","hls","-hls_time","2","-hls_list_size","0",
                 "-hls_segment_filename",str(root/"seg%03d.ts"),str(root/(RID+".m3u8"))],check=True,timeout=120)
         upstream=http.server.ThreadingHTTPServer(("127.0.0.1",0),Gateway)
+        upstream.favourite_lock=threading.Lock()
+        upstream.favourites=set()
+        upstream.favourite_events=[]
         upstream.root=root
         upstream.media={p.name for p in root.iterdir()}
         cfg=root/"config.json"
@@ -106,6 +127,10 @@ def fixture():
                 if self.command=="POST" and re.fullmatch(r"/Items/[0-9a-f]{32}/PlaybackInfo",urllib.parse.urlsplit(self.path).path):
                     with b.lock:b.fixture_attempts.append((urllib.parse.urlsplit(self.path).path.split("/")[2],int(code)))
         b.fixture_attempts=[]
+        def favourite_snapshot():
+            with upstream.favourite_lock:
+                return list(upstream.favourite_events),sorted(upstream.favourites)
+        b.fixture_favourite_snapshot=favourite_snapshot
         server.RequestHandlerClass=Trace
         threads=[threading.Thread(target=x.serve_forever,daemon=True) for x in (upstream,server)]
         for t in threads:t.start()

@@ -1,5 +1,5 @@
 import unittest
-from surf_acceptance import evaluate
+from surf_acceptance import evaluate, evaluate_controls
 A="a"*32;B="b"*32
 def fixture():
     lines=[];attempts=[]
@@ -29,4 +29,16 @@ class AcceptanceTest(unittest.TestCase):
     def test_stall(self):
         lines,attempts=fixture()
         with self.assertRaises(RuntimeError):evaluate(lines.replace("stalls=0","stalls=1"),[A,B],attempts)
+class ControlsTest(unittest.TestCase):
+    def test_round_trip(self):
+        lines="JELLOP_SMOKE_POLICY banned=1 hiatus=1 playable=0\nJELLOP_SMOKE_FAVOURITE value=1\nJELLOP_SMOKE_FAVOURITE value=0"
+        self.assertTrue(evaluate_controls(lines,[(A,True),(A,False)],[],A)["favourite_round_trip"])
+    def test_incomplete(self):
+        self.assertIsNone(evaluate_controls("",[(A,True)],[A],A))
+    def test_wrong_identity(self):
+        with self.assertRaises(RuntimeError):evaluate_controls("",[(B,True)],[],A)
+    def test_failed_native(self):
+        with self.assertRaises(RuntimeError):evaluate_controls("JELLOP_SMOKE_CONTROL_FAIL",[],[],A)
+    def test_failed_persistence(self):
+        with self.assertRaises(RuntimeError):evaluate_controls("",[(A,True),(A,False)],[A],A)
 if __name__=="__main__":unittest.main()
