@@ -12,6 +12,7 @@
 //  Times are Jellyfin ticks: 100 ns units since 0001-01-01 UTC.  The console
 //  clock is UTC (sysGetCurrentTime); the time zone only matters for display.
 
+enum { LT_POLICY_UNKNOWN, LT_POLICY_ELIGIBLE, LT_POLICY_HIATUS, LT_POLICY_BANNED };
 typedef struct {
     char id[40];
     char name[96];
@@ -19,9 +20,11 @@ typedef struct {
     char logo_tag[40];            // ImageTags.Primary, "" when there is no logo
     bool favourite;               // UserData.IsFavorite
     bool genre_authoritative;
+    uint8_t policy_state;          // authoritative bridge status; zero = absent
     uint32_t genre_mask;
     // The current programme (AddCurrentProgram=true); empty without a guide.
     char     now_title[128];
+    uint32_t policy_until_unix;    // use existing record alignment padding
     uint64_t now_start_ticks, now_end_ticks;
     uint64_t now_evidence_expiry_ticks; // 0 for ordinary Jellyfin EPG
     uint64_t now_evidence_observed_ticks;
@@ -64,6 +67,7 @@ void livetv_format_hm(uint64_t ticks, int utc_offset_secs, char *out, int cap);
 // Favourites first, then by channel number (numerically; channels without a
 // number after those with one), then by name.  Stable.
 void livetv_sort_channels(JFChannel *c, int n);
+bool livetv_policy_excluded(const JFChannel *c);
 bool livetv_current_title_valid(const JFChannel *c, uint64_t now);
 bool livetv_programme_title_valid(const JFProgram *p, uint64_t now);
 int livetv_current_programme_index(const JFProgram *p, int n, const char *channel, uint64_t now);
