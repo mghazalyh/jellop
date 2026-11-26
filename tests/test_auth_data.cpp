@@ -1,4 +1,5 @@
 #include "auth_data.h"
+#include "profile_model.h"
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
@@ -50,5 +51,26 @@ int main() {
         assert(!read_config(invalid[i], &session));
         assert(memcmp(&session, &before, sizeof(session)) == 0);
     }
-    puts("auth_data: credential escaping and saved-session regressions passed");
+    JellopProfiles profiles=profile_default(),decoded=profile_default();
+    char text[560],url[256];
+    assert(profile_normalize_url("http://gateway:18796/",profiles.url[0],256));
+    assert(profile_normalize_url("https://gateway.example:18797/malay/",profiles.url[1],256));
+    assert(!strcmp(profiles.url[0],"http://gateway:18796"));
+    profiles.pending=1;
+    assert(profile_format(&profiles,text,sizeof text)>0);
+    assert(profile_parse(text,&decoded));
+    assert(decoded.pending==1&&!strcmp(decoded.url[1],profiles.url[1]));
+    assert(profile_active(&decoded,"http://gateway:18796/")==0);
+    assert(profile_active(&decoded,"http://gateway:18798")==-1);
+    const char *bad_urls[]={"http://", "ftp://gateway","http://user@gateway",
+        "http://gateway:0","http://gateway:65536","http://gateway:12x",
+        "http://gateway/?token=x","http://gateway/#fragment",
+        "http://gateway/a/../b","http://gateway/a%2fb","http://gateway\nbad",
+        "http://[::1]:8096","http://gateway/a//b"};
+    for(const char *bad:bad_urls)assert(!profile_normalize_url(bad,url,sizeof url));
+    assert(!profile_parse("JELLOP-PROFILES-1\n1\nhttp://gateway\n\n",&decoded));
+    assert(!profile_parse("JELLOP-PROFILES-1\n0\nhttp://gateway\nhttp://gateway\n",&decoded));
+    assert(!profile_parse("JELLOP-PROFILES-1\n-1\n\n\nextra",&decoded));
+    assert(decoded.pending==1&&!strcmp(decoded.url[1],profiles.url[1]));
+    puts("auth_data: credential escaping, saved-session and gateway profile regressions passed");
 }

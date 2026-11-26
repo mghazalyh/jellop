@@ -11,6 +11,7 @@
 #include "ui_visuals.h"
 #include "settings_model.h"
 #include "jellyfin_api.h"
+#include "jellop_profiles.h"
 #include "update_check.h"
 #include "log_upload.h"
 #include "plog.h"
@@ -162,7 +163,38 @@ static void v_offline(char *b, int c, bool *l) {
 }
 
 // ---- activation and stepping ----
-static void a_logout(void)     { g_settings_confirm = true; }
+static void a_logout(void)     { jf_profile_cancel(); g_settings_confirm = true; }
+static void v_gateway(char *b,int c,bool *l,int index) {
+    const char *url=jf_profile_url(index);
+    val_text(b,c,l,url[0]?url:"Not configured",url[0]!=0);
+}
+static void v_english_gateway(char *b,int c,bool *l){v_gateway(b,c,l,0);}
+static void v_malay_gateway(char *b,int c,bool *l){v_gateway(b,c,l,1);}
+static void v_connect_gateway(char *b,int c,bool *l,int index){
+    bool active=jf_profile_active()==index;
+    val_text(b,c,l,active?"Active":jf_profile_url(index)[0]?"Connect":"Not configured",active);
+}
+static void v_connect_english(char *b,int c,bool *l){v_connect_gateway(b,c,l,0);}
+static void v_connect_malay(char *b,int c,bool *l){v_connect_gateway(b,c,l,1);}
+static void a_edit_gateway(int index){
+    char url[256];
+    snprintf(url,sizeof url,"%s",jf_profile_url(index));
+    rsxSync();flip();
+    int result=get_input(url,sizeof url,index==0?"English gateway URL":"Malay gateway URL",false,true);
+    init_btns();
+    if(result!=1)return;
+    if(!jf_profile_set_url(index,url))
+        xmb_dl_notice("Gateway settings","Invalid, duplicate or unsaved gateway URL.");
+}
+static void a_english_gateway(){a_edit_gateway(0);}
+static void a_malay_gateway(){a_edit_gateway(1);}
+static void a_connect_gateway(int index){
+    if(jf_profile_active()==index){xmb_dl_notice("Gateway profile","This gateway is already active.");return;}
+    if(!jf_profile_request(index)){xmb_dl_notice("Gateway profile","Configure the gateway URL first.");return;}
+    g_settings_confirm=true;
+}
+static void a_connect_english(){a_connect_gateway(0);}
+static void a_connect_malay(){a_connect_gateway(1);}
 static void a_screen(void)     { g_overscan_calib_prev = overscan_frac(); g_overscan_calib = true; }
 static void a_update(void) {
     if (update_check_state() == UPD_AVAILABLE) xmb_update_popup_reopen();
@@ -312,6 +344,10 @@ static const UiRow k_ui[] = {
     ACTION(SET_DOWNLOADS,   ICON_COLLECTIONS, v_downloads, a_downloads),
     ACTION(SET_OFFLINE_LIB, ICON_PLAY,        v_offline,   a_offline),
     TOGGLE(SET_SHARE_LOGIN, ICON_LOGOUT,      v_share,     t_share),
+    ACTION(SET_ENGLISH_GATEWAY, ICON_ANTENNA, v_english_gateway, a_english_gateway),
+    ACTION(SET_MALAY_GATEWAY, ICON_ANTENNA, v_malay_gateway, a_malay_gateway),
+    ACTION(SET_CONNECT_ENGLISH, ICON_LOGOUT, v_connect_english, a_connect_english),
+    ACTION(SET_CONNECT_MALAY, ICON_LOGOUT, v_connect_malay, a_connect_malay),
     ACTION(SET_LOGOUT,      ICON_LOGOUT,      NULL,        a_logout),
 };
 
@@ -498,10 +534,13 @@ void xmb_draw_settings(void) {
     if (g_settings_confirm) {
         int mx, my, mw, mh;
         settings_confirm_rect(&mx, &my, &mw, &mh);
-        const char *q = TR("Log out of this account?");
+        const int requested=jf_profile_requested();
+        const char *q = requested==0?"Switch to English gateway?":
+                        requested==1?"Switch to Malay gateway?":TR("Log out of this account?");
         int qw = ttf_text_width(q, UIS_TF(21), true);
         drawTTF((u32)(mx + (mw - qw) / 2), (u32)(my + UIS_H(28)), q, UIS_TF(21), XMB_TEXT, true);
-        const char *s = TR("You'll need to sign in again to browse your library.");
+        const char *s = requested>=0?"Relaunch Jellop to sign in to the selected gateway.":
+                        TR("You'll need to sign in again to browse your library.");
         int sw = ttf_text_width(s, UIS_TF(14));
         drawTTF((u32)(mx + (mw - sw) / 2), (u32)(my + UIS_H(66)), s, UIS_TF(14), XMB_TEXT_DIM);
         return;

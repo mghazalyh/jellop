@@ -118,6 +118,18 @@ static const setting_row k_rows[] = {
       TRN("Send the diagnostic log to your Jellyfin server (X). It is saved\n"
       "under Dashboard > Logs as upload_PS3_...log: share that file.")},
     // ---- Account & Server
+    { SET_ENGLISH_GATEWAY, SEC_ACCOUNT, TRN("English Gateway"),
+      TRN("Enter the URL of your English IPTV gateway.\n"
+      "Leave empty to remove the profile.")},
+    { SET_MALAY_GATEWAY, SEC_ACCOUNT, TRN("Malay Gateway"),
+      TRN("Enter the URL of your Malay IPTV gateway.\n"
+      "Leave empty to remove the profile.")},
+    { SET_CONNECT_ENGLISH, SEC_ACCOUNT, TRN("Connect English"),
+      TRN("Switch to the saved English gateway.\n"
+      "Jellop closes; relaunch it and sign in to the new gateway.")},
+    { SET_CONNECT_MALAY, SEC_ACCOUNT, TRN("Connect Malay"),
+      TRN("Switch to the saved Malay gateway.\n"
+      "Jellop closes; relaunch it and sign in to the new gateway.")},
     { SET_SHARE_LOGIN, SEC_ACCOUNT, TRN("Share Sign-in"),
       TRN("On: PS3 users with no sign-in of their own use this account.\n"
       "One account can be shared; users signed in to their own keep it.")},
