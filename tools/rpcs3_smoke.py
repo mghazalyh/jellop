@@ -32,7 +32,7 @@ def main():
     (tmp/"jellop_smoke.txt").write_text("fixture-surf-v1\n")
     state=tmp/"jf_state.log"
     config=out/"rpcs3-config.yml"
-    config.write_text("Video:\n  Renderer: OpenGL\n  Write Color Buffers: true\n  Read Color Buffers: true\nAudio:\n  Renderer: Null\n  Music Handler: Null\nInput/Output:\n  Camera: Null\nNet:\n  Internet enabled: Connected\n  Bind address: 0.0.0.0\n")
+    config.write_text("Video:\n  Renderer: OpenGL\n  Write Color Buffers: true\n  Read Color Buffers: true\nAudio:\n  Renderer: \"Null\"\n  Music Handler: \"Null\"\nInput/Output:\n  Camera: \"Null\"\nNet:\n  Internet enabled: Connected\n  Bind address: 0.0.0.0\n")
     env=dict(os.environ,LIBGL_ALWAYS_SOFTWARE="1",QT_X11_NO_MITSHM="1")
     proc=None
     cache=Path(os.environ.get("XDG_CACHE_HOME",str(root)))/"rpcs3"
@@ -43,11 +43,21 @@ def main():
                 stdout=log,stderr=subprocess.STDOUT,env=env,start_new_session=True)
             deadline=time.monotonic()+300
             last_state=""
+            config_verified=False
             while time.monotonic()<deadline:
                 if rpcs3_log.exists():
                     with rpcs3_log.open("rb") as raw:
                         raw.seek(max(0,rpcs3_log.stat().st_size-262144))
                         recent=raw.read().decode(errors="replace")
+                    if not config_verified and "Used configuration:" in recent:
+                        used=recent.split("Used configuration:",1)[1]
+                        if "\nNet:\n" in used and "Internet enabled:" in used:
+                            audio=used.split("\nAudio:\n",1)[1].split("\nInput/Output:",1)[0]
+                            for key in ("Renderer","Music Handler"):
+                                if not re.search(r"(?m)^  "+key+r': "?Null"?\s*$',audio):
+                                    raise RuntimeError("RPCS3 effective Audio "+key+" is not Null")
+                            config_verified=True
+                            print("RPCS3 effective audio configuration verified",flush=True)
                     if ("Emulation has been frozen!" in recent or
                         "Thread terminated due to fatal error" in recent):
                         raise RuntimeError("RPCS3 reported fatal emulation freeze; see RPCS3.log")
@@ -58,7 +68,7 @@ def main():
                     last_state=lines
                 channels=re.findall(r"JELLOP_LIVE_CONFIRMED channel=([a-f0-9]{32}) frame=(\d+)",lines)
                 confirmed={cid for cid,n in channels if int(n)>0}
-                if "JELLOP_SMOKE_CATALOGUE count=2" in lines and "JELLOP_SURF_DUE " in lines and set(CHANNELS)<=confirmed:
+                if config_verified and "JELLOP_SMOKE_CATALOGUE count=2" in lines and "JELLOP_SURF_DUE " in lines and set(CHANNELS)<=confirmed:
                     after=lines[lines.rfind("JELLOP_LIVE_CONFIRMED"):]
                     frames=[int(x) for x in re.findall(r"AVSYNC .*?frame=(\d+)",after)]
                     if len(frames)>=2 and frames[-1]>frames[0]:
@@ -68,14 +78,14 @@ def main():
                 time.sleep(1)
             raise RuntimeError("Timed out waiting for catalogue, decoded playback and actual Surf transition")
         finally:
+            if not (out/"screen.png").exists():
+                try:subprocess.run(["import","-window","root",str(out/"failure-screen.png")],timeout=15,check=False)
+                except (OSError,subprocess.TimeoutExpired):pass
             if proc and proc.poll() is None:
                 os.killpg(proc.pid,signal.SIGTERM)
                 try:proc.wait(timeout=10)
                 except subprocess.TimeoutExpired:
                     os.killpg(proc.pid,signal.SIGKILL);proc.wait()
-            if not (out/"screen.png").exists():
-                try:subprocess.run(["import","-window","root",str(out/"failure-screen.png")],timeout=15,check=False)
-                except (OSError,subprocess.TimeoutExpired):pass
             for src in (state,tmp/"crash_log.txt",tmp/"player_log.txt",rpcs3_log):
                 if src.is_file():
                     with src.open("rb") as f:

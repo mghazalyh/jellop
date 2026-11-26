@@ -70,7 +70,7 @@ jobs:
       - name: Install firmware and candidate in isolated RPCS3 profile
         run: |
           mkdir -p "$XDG_CONFIG_HOME/rpcs3" "$XDG_CACHE_HOME" "$XDG_DATA_HOME" smoke
-          printf 'Video:\n  Renderer: Null\nAudio:\n  Renderer: Null\n' > "$XDG_CONFIG_HOME/rpcs3/config.yml"
+          printf 'Video:\n  Renderer: "Null"\nAudio:\n  Renderer: "Null"\n  Music Handler: "Null"\n' > "$XDG_CONFIG_HOME/rpcs3/config.yml"
           set -o pipefail
           timeout 30 "$RUNNER_TEMP/squashfs-root/AppRun" --headless --version 2>&1 | tee smoke/version.log
           # RPCS3's headless installer can abort on teardown (fixed_typemap).
