@@ -25,7 +25,7 @@ def evaluate(lines,channels,attempts,transitions=4):
             a,b,cycle=m.groups();cycle=int(cycle)
             if pending or not sessions or sessions[-1]["channel"]!=a or b not in expected or b==a:
                 raise RuntimeError("Invalid automatic transition")
-            if cycle!=(len(switches)+2)//2:raise RuntimeError("Unexpected Surf cycle sequence")
+            if cycle!=1+(len(switches)+1)//2:raise RuntimeError("Unexpected Surf cycle sequence")
             pending=(a,b,cycle);switches.append(pending)
             continue
         m=SAMPLE.search(line)

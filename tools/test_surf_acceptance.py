@@ -8,7 +8,7 @@ def fixture():
         lines.append(f"JELLOP_LIVE_CONFIRMED channel={cid} frame={i+1}")
         for sec in (1,3,15):
             lines.append(f"JELLOP_LIVE_SAMPLE channel={cid} frames={sec*30} decoded_ms={sec*1000} stalls=0 free_kib=12000 programme=Fixture Film {1 if cid==A else 2} (2020)")
-        if i<4:lines.append(f"JELLOP_SURF_DUE from={cid} to={B if cid==A else A} cycle={(i+2)//2}")
+        if i<4:lines.append(f"JELLOP_SURF_DUE from={cid} to={B if cid==A else A} cycle={1+(i+1)//2}")
     return "\n".join(lines),attempts
 class AcceptanceTest(unittest.TestCase):
     def test_complete(self):
