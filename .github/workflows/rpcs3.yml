@@ -1,8 +1,14 @@
 name: Jellop RPCS3
 on:
   push:
-    branches: [main, 'engineering/runtime-controls', 'engineering/integration']
+    branches: [main, 'engineering/runtime-controls', 'engineering/integration', 'engineering/endurance']
   workflow_dispatch:
+    inputs:
+      transitions:
+        description: "Even automatic transition count (4-24)"
+        type: number
+        required: false
+        default: 4
 permissions:
   contents: read
 concurrency:
@@ -111,13 +117,14 @@ jobs:
           python3 -c 'from pathlib import Path; import sys; p=Path(sys.argv[1]); assert (p/"USRDIR/EBOOT.BIN").read_bytes()[:4] == b"SCE\0"; assert b"JELP30001" in (p/"PARAM.SFO").read_bytes()' "$game"
       - name: Actual graphical playback and repeated Surf cycles from deployed media
         env:
+          SURF_TRANSITIONS: ${{ github.ref_name == 'engineering/endurance' && '20' || inputs.transitions || '4' }}
           JELLOP_PUBLIC_FIXTURE: '1'
         run: |
           # Use the runner's own private IPv4 rather than guest loopback.
           # The fixture exists only in this ephemeral GitHub runner.
           export JELLOP_FIXTURE_HOST="$(ip -4 route get 1.1.1.1 | awk '{for(i=1;i<=NF;i++)if($i=="src"){print $(i+1);exit}}')"
           test -n "$JELLOP_FIXTURE_HOST"
-          xvfb-run -a -s '-screen 0 1280x720x24' python3 tools/rpcs3_smoke.py --emulator "$RUNNER_TEMP/squashfs-root/AppRun" --root "$XDG_CONFIG_HOME/rpcs3" --output smoke
+          xvfb-run -a -s '-screen 0 1280x720x24' python3 tools/rpcs3_smoke.py --emulator "$RUNNER_TEMP/squashfs-root/AppRun" --root "$XDG_CONFIG_HOME/rpcs3" --output smoke --transitions "$SURF_TRANSITIONS"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
