@@ -576,7 +576,7 @@ void prefs_save(void) {
 
 // The key of the page on screen while the tab is paged (and not searching), else 0.
 int cur_key(void) {
-    return (s_index_ok && !s_search_on && s_page >= 0 && s_page < s_npages) ? s_pages[s_page].key : 0;
+    return ((paging() || policy_page()) && !s_search_on && s_page >= 0 && s_page < s_npages) ? s_pages[s_page].key : 0;
 }
 
 // The pages on offer: what the server has, less what the viewer hid, behind
