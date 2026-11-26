@@ -21,6 +21,7 @@
 #include "slog.h"
 #if BUILD_FOR_RPCS3
 #include "jf_paths.h"
+#include "spine.h"
 extern bool xmb_livetv_smoke_start(void);
 #endif
 #include "plog.h"
@@ -777,7 +778,7 @@ void ui_run_xmb(void) {
         if (smoke == 1) {
             for (int t=0;t<XMB_TAB_COUNT;t++) if(g_tabs[t].enabled && xmb_kind(t)==TABKIND_LIVETV) {
                 if(g_active_tab!=t) xmb_switch_tab(t);
-                spine_set_level(2);
+                spine_set_level(SPINE_L2);
                 smoke=2;
                 slog_state("JELLOP_SMOKE_LIVETV");
                 break;
@@ -787,7 +788,7 @@ void ui_run_xmb(void) {
             // Keep the normal Live TV tab selected until the animation settles.
             for(int t=0;t<XMB_TAB_COUNT;t++) if(g_tabs[t].enabled && xmb_kind(t)==TABKIND_LIVETV){
                 if(g_active_tab!=t)xmb_switch_tab(t);
-                spine_set_level(2);
+                spine_set_level(SPINE_L2);
                 if(xmb_livetv_smoke_start())smoke=3;
                 break;
             }

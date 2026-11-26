@@ -69,6 +69,8 @@ jobs:
           /tmp/test-jellop-config
           g++ -std=c++11 -Wall -Wextra -Werror -O2 port/test_brightness.cpp -o /tmp/test-brightness
           /tmp/test-brightness
+          g++ -std=c++11 -Wall -Wextra -Werror -O2 port/test_views_json.cpp -o /tmp/test-views-json
+          /tmp/test-views-json
       - name: Upstream Live TV and stream regressions
         working-directory: tests
         run: |

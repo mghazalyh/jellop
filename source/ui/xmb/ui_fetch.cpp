@@ -12,6 +12,7 @@
 #include "server_discovery.h"
 #include "wol_net.h"
 #include "plog.h"
+#include "views_json.h"
 #include "../../build_config.h"   // SHOW_PLAYLISTS_TAB
 
 // -------------------------------------------------------
@@ -87,36 +88,24 @@ static bool detect_tabs_parse(int status, const char *buf) {
         return false;
     }
 
-    const char *p = strstr(buf, "\"Items\":[");
-    if (!p) {
-        char b[192];
-        snprintf(b, sizeof(b),
-                 "detect_tabs: no Items[] in %d-byte reply, head=[%.90s]",
-                 (int)strlen(buf), buf);
-        plog(b);
+    ViewsCursor cursor;
+    if (!views_begin(buf,&cursor)) {
+        plog("detect_tabs: invalid top-level Items array");
         add_media_tab(next);
         return false;
     }
-    p += 9;
-
-    while (*p) {
-        while (*p && *p != '{' && *p != ']') p++;
-        if (!*p || *p == ']') break;
-        const char *obj = p;
-        int depth = 0; bool in_str = false, esc = false;
-        while (*p) {
-            char c = *p;
-            if (esc) { esc = false; }
-            else if (in_str) { if (c=='\\') esc=true; else if (c=='"') in_str=false; }
-            else { if (c=='"') in_str=true; else if (c=='{') depth++; else if (c=='}') { if (--depth==0){p++;break;} } }
-            p++;
+    for (;;) {
+        ViewFields view={};
+        const int got=views_next(&cursor,&view);
+        if(got==0)break;
+        if(got<0){
+            // An incomplete response is never a successful partial catalogue.
+            for(int t=XMB_TAB_LIB0;t<XMB_TAB_COUNT;t++)memset(&g_tabs[t],0,sizeof(g_tabs[t]));
+            add_media_tab(XMB_TAB_LIB0);
+            plog("detect_tabs: malformed library row");
+            return false;
         }
-        int olen = (int)(p - obj);
-
-        char ct[32] = "", id[64] = "", name[40] = "";
-        xmb_json_str_range(obj, olen, "CollectionType", ct,   sizeof(ct));
-        xmb_json_str_range(obj, olen, "Id",             id,   sizeof(id));
-        xmb_json_str_range(obj, olen, "Name",           name, sizeof(name));
+        const char *ct=view.collection_type,*id=view.id,*name=view.name;
         if (!id[0]) continue;
 
         if (next >= XMB_TAB_COUNT - 1) {        // (the last slot is the Media tab's)
