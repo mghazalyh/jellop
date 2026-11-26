@@ -1167,12 +1167,59 @@ void xmb_livetv_record_played(const char *id) {
 }
 
 #if BUILD_FOR_RPCS3
+static bool s_fixture_playback=false;
+bool xmb_livetv_smoke_active(void) { return s_fixture_playback; }
 bool xmb_livetv_smoke_start(void) {
     tick(); // identical render-thread catalogue pump, once per frame
-    if (!s_loaded || s_n < 2 || policy_page()) return false;
+    static int stage=0, return_key=0;
+    if(!s_index_ok || !s_loaded)return false;
+    if(stage==0){
+        if(policy_page()||s_n!=2)return false;
+        return_key=cur_key();
+        for(int i=0;i<s_npages;i++)if(s_pages[i].key==LP_POLICY){
+            set_page(i);stage=1;return false;
+        }
+        slog_state("JELLOP_SMOKE_CONTROL_FAIL missing-policy-page");
+        stage=-1;return false;
+    }
+    if(stage==1){
+        if(!policy_page()||s_n!=2||s_policy_total!=2){
+            slog_state("JELLOP_SMOKE_CONTROL_FAIL policy-count");
+            stage=-1;return false;
+        }
+        // Verify the same strings drawn by the native browser, and both
+        // independent playback guards. The actual page renders this frame.
+        const char *ban="dddddddddddddddddddddddddddddddd";
+        const char *hiatus="eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee";
+        const int a=xmb_livetv_index_of(ban),b=xmb_livetv_index_of(hiatus);
+        JFChannel row;
+        NowNext na={},nb={};
+        if(a>=0)now_next(&s_ch[a],jf_now_ticks(),&na);
+        if(b>=0)now_next(&s_ch[b],jf_now_ticks(),&nb);
+        if(a<0||b<0||s_ch[a].policy_state!=LT_POLICY_BANNED||
+           s_ch[b].policy_state!=LT_POLICY_HIATUS||s_ch[b].policy_until_unix!=4102444800u||
+           strcmp(na.now,"Banned - unavailable")||strncmp(nb.now,"Hiatus until ",13)||
+           xmb_livetv_count()!=0||xmb_livetv_get(a,&row)||xmb_livetv_get(b,&row)){
+            slog_state("JELLOP_SMOKE_CONTROL_FAIL policy-content");
+            stage=-1;return false;
+        }
+        play_channel(a);play_channel(b); // must never issue PlaybackInfo
+        slog_state("JELLOP_SMOKE_POLICY banned=1 hiatus=1 playable=0");
+        stage=2;return false;
+    }
+    if(stage==2){
+        for(int i=0;i<s_npages;i++)if(s_pages[i].key==return_key){
+            set_page(i);stage=3;return false;
+        }
+        slog_state("JELLOP_SMOKE_CONTROL_FAIL missing-return-page");
+        stage=-1;return false;
+    }
+    if(stage!=3||s_n!=2||policy_page())return false;
     slog_state("JELLOP_SMOKE_CATALOGUE count=%d",s_n);
     s_surf_requested=true;
+    s_fixture_playback=true;
     play_channel(0);
+    s_fixture_playback=false;
     return true;
 }
 #endif

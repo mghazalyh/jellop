@@ -261,6 +261,9 @@ void player_prefill(PlayerState *ps, bool fatal_on_eof, int guard_max);
 // still to perform: HUD_ACTION_SEEK when a track change needs a 0-delta
 // reopen, otherwise HUD_ACTION_NONE (or act unchanged if not menu-related).
 HudAction player_handle_menu_action(PlayerState *ps, HudAction act);
+#if BUILD_FOR_RPCS3
+void player_smoke_favourite_tick(PlayerState *ps,unsigned frames);
+#endif
 
 // START: the Options menu over the player (Chapters, Audio / Subtitles,
 // Picture, Playback Statistics, Next / Previous Episode, Skip Intros / Credits;

@@ -280,6 +280,60 @@ static HudAction options_select(PlayerState *ps, int sel) {
     return HUD_ACTION_NONE;
 }
 
+#if BUILD_FOR_RPCS3
+// Exercise the production Options menu and selection dispatcher. The fixture
+// performs a round-trip add/remove on the first decoded channel only.
+void player_smoke_favourite_tick(PlayerState *ps,unsigned frames) {
+    static int stage=0;
+    static int row=-1;
+    if(!xmb_livetv_smoke_active()||!ps->live||!ps->item||stage<0||stage>=6||frames<30)return;
+    JFChannel ch;
+    const int at=xmb_livetv_index_of(ps->item->id);
+    if(strcmp(ps->item->id,"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")||
+       at<0||!xmb_livetv_get(at,&ch)){
+        slog_state("JELLOP_SMOKE_CONTROL_FAIL favourite-channel");
+        stage=-1;return;
+    }
+    if(stage==0||stage==3){
+        const bool expected=stage==3;
+        if(ch.favourite!=expected||jf_favourite_async_pending()){
+            slog_state("JELLOP_SMOKE_CONTROL_FAIL favourite-initial-state");
+            stage=-1;return;
+        }
+        player_open_options(ps,0);
+        row=-1;
+        for(int i=0;i<s_opt_n;i++)if(s_opt_kind[i]==OPT_FAVOURITE)row=i;
+        if(row<0||!hud_menu_open()){
+            slog_state("JELLOP_SMOKE_CONTROL_FAIL favourite-menu");
+            stage=-1;return;
+        }
+        hud_set_menu_cursor(row);
+        stage++;return;
+    }
+    if(stage==1||stage==4){
+        if(!hud_menu_open()||ps->menu_kind!=PLAYER_MENU_OPTIONS){
+            slog_state("JELLOP_SMOKE_CONTROL_FAIL favourite-menu-closed");
+            stage=-1;return;
+        }
+        hud_close_menu();
+        options_select(ps,row);
+        if(!jf_favourite_async_pending()){
+            slog_state("JELLOP_SMOKE_CONTROL_FAIL favourite-submit");
+            stage=-1;return;
+        }
+        stage++;return;
+    }
+    if(jf_favourite_async_pending())return;
+    const bool want=stage==2;
+    if(ch.favourite!=want){
+        slog_state("JELLOP_SMOKE_CONTROL_FAIL favourite-confirmation");
+        stage=-1;return;
+    }
+    slog_state("JELLOP_SMOKE_FAVOURITE value=%d",want?1:0);
+    stage++;
+}
+#endif
+
 HudAction player_handle_menu_action(PlayerState *ps, HudAction act) {
     if (ps->live) {
         const int favourite = xmb_livetv_favourite_result();

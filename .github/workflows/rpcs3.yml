@@ -1,7 +1,7 @@
 name: Jellop RPCS3
 on:
   push:
-    branches: [main]
+    branches: [main, 'engineering/runtime-controls']
   workflow_dispatch:
 permissions:
   contents: read

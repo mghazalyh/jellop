@@ -19,3 +19,8 @@ bool xmb_livetv_surf_save(const SurfStore *store);
 // Consume a completed fullscreen favourite request on the render thread.
 // Returns 1 for success, -1 for failure, or 0 if no result is ready.
 int xmb_livetv_favourite_result(void);
+
+// Emulator-only, armed by the authenticated fixture driver.
+#if BUILD_FOR_RPCS3
+bool xmb_livetv_smoke_active(void);
+#endif

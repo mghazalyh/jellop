@@ -8,7 +8,7 @@ import signal
 import subprocess
 import time
 from rpcs3_fixture import fixture, TOKEN, USER, CHANNELS, EXCLUDED
-from surf_acceptance import evaluate
+from surf_acceptance import evaluate, evaluate_controls
 
 def main():
     ap=argparse.ArgumentParser()
@@ -99,9 +99,12 @@ def main():
                 if any(x in lines for x in ("JELLOP_SMOKE_MARKER_ABSENT","JELLOP_SMOKE_INVALID_MARKER","JELLOP_SMOKE_CONFIG_MISMATCH")):
                     raise RuntimeError("Guest did not arm the fixture driver")
                 with b.lock:attempts=list(b.fixture_attempts)
+                events,favourites=b.fixture_favourite_snapshot()
+                controls=evaluate_controls(lines,events,favourites,CHANNELS[0])
                 if config_verified and "JELLOP_SMOKE_CATALOGUE count=2" in lines:
                     result=evaluate(lines,CHANNELS,attempts)
-                    if result:
+                    if result and controls:
+                        result["controls"]=controls
                         result["excluded_channels"]=EXCLUDED
                         result["public_fixture"]=os.environ.get("JELLOP_PUBLIC_FIXTURE")=="1"
                         (out/"result.json").write_text(json.dumps(result,indent=2))

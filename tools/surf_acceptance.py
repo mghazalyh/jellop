@@ -52,3 +52,22 @@ def evaluate(lines,channels,attempts,transitions=4):
         "minimum_free_kib":min(x["free_kib"] for x in samples),
         "maximum_free_kib":max(x["free_kib"] for x in samples),
         "decoded_stalls":sum(x["stalls"] for x in samples)}
+
+
+def evaluate_controls(lines,events,favourites,first_channel):
+    """Require native policy view and successful shared favourite round trip."""
+    if "JELLOP_SMOKE_CONTROL_FAIL" in lines:
+        raise RuntimeError("Native fixture control failed")
+    expected=[(first_channel,True),(first_channel,False)]
+    if len(events)>2 or events!=expected[:len(events)]:
+        raise RuntimeError("Unexpected favourite mutation sequence")
+    if len(events)!=2:return None
+    if favourites:raise RuntimeError("Favourite removal was not persisted")
+    policy="JELLOP_SMOKE_POLICY banned=1 hiatus=1 playable=0"
+    values=re.findall(r"JELLOP_SMOKE_FAVOURITE value=([01])",lines)
+    if len(values)>2 or values!=["1","0"][:len(values)]:
+        raise RuntimeError("Native favourite confirmation sequence invalid")
+    if policy not in lines or len(values)!=2:return None
+    if not lines.index(policy)<lines.index("JELLOP_SMOKE_FAVOURITE value=1"):
+        raise RuntimeError("Policy browser was not tested before playback")
+    return {"policy_banned":1,"policy_hiatus":1,"policy_playable":0,"favourite_round_trip":True}
