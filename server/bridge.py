@@ -367,6 +367,37 @@ class Bridge:
                 for (owner,cid,sid),r in self.evidence.items() if owner==token],
                 "PolicyMutation":False}
 
+    def insights(self,token):
+        # Fresh authoritative catalogue, and only the calling token's
+        # bounded playback evidence. A missing policy is not a clean bill
+        # of health. Neither this route nor diagnostics changes exclusions.
+        rows=self.catalogue(token,fresh=True,include_excluded=True)
+        now=time.time()
+        banned=hiatus=eligible=0
+        if self.require_policy:
+            for row in rows:
+                policy=row["JellopHealth"]
+                if policy["banned"]:banned+=1
+                elif policy["hiatusUntil"]>now:hiatus+=1
+                else:eligible+=1
+        cfg=self.config.snapshot()
+        with self.lock:
+            sessions=[r for (owner,_,_),r in self.evidence.items() if owner==token]
+            observed=[r for r in sessions if r["last"] is not None]
+            free=[r["last"]["FreeKiB"] for r in observed if r["last"]["FreeKiB"]>0]
+            faults={"startup-error","transcode-output-timeout","client-or-network-timeout",
+                    "transport-or-transcoder-error"}
+            result={"SchemaVersion":1,"PolicyKnown":int(self.require_policy),
+                    "TotalChannels":len(rows),"Eligible":eligible,"Hiatus":hiatus,"Banned":banned,
+                    "Sessions":len(sessions),"Active":sum(r["active"] for r in sessions),
+                    "ObservedSessions":len(observed),
+                    "StalledSessions":sum(r["last"]["Stalls"]>0 for r in observed),
+                    "SustainedSessions":sum(r["sustained"] for r in observed),
+                    "TransportFaultSessions":sum(r.get("outcome") in faults for r in sessions),
+                    "MinReportedFreeKiB":min(free) if free else 0,
+                    "ConfigRevision":cfg["revision"],"ConfigFault":int(bool(self.config.fault))}
+        return {"JellopInsights":result}
+
     def dispatch(self,method,path,q,headers,body):
         if path=="/System/Info/Public" and method=="GET":
             return self.upstream(path)
@@ -382,6 +413,7 @@ class Bridge:
             excluded=[r for r in rows if r["JellopHealth"]["banned"] or r["JellopHealth"]["hiatusUntil"]>time.time()]
             return page_rows(filtered_channels(excluded,q),q)
         if path=="/Jellop/Diagnostics" and method=="GET":return self.diagnostics(token)
+        if path=="/Jellop/Insights" and method=="GET":return self.insights(token)
         if path=="/Jellop/Config" and method=="GET":
             self.catalogue(token,fresh=True)
             return {"JellopConfig":self.config.snapshot(),"Fault":self.config.fault}

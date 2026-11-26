@@ -1,7 +1,7 @@
 name: Jellop PS3
 on:
   push:
-    branches: [main, 'engineering/surf-controls', 'engineering/fullscreen-favourites', 'engineering/policy-view', 'engineering/runtime-controls']
+    branches: [main, 'engineering/surf-controls', 'engineering/fullscreen-favourites', 'engineering/policy-view', 'engineering/gateway-profiles', 'engineering/scoped-history', 'engineering/insights', 'engineering/runtime-controls', 'engineering/integration']
   workflow_dispatch:
 permissions:
   contents: read
@@ -71,12 +71,14 @@ jobs:
           /tmp/test-brightness
           g++ -std=c++11 -Wall -Wextra -Werror -O2 port/test_views_json.cpp -o /tmp/test-views-json
           /tmp/test-views-json
+          g++ -std=c++11 -Wall -Wextra -Werror -O2 port/test_insights.cpp -o /tmp/test-jellop-insights
+          /tmp/test-jellop-insights
           python3 tools/test_surf_acceptance.py
       - name: Upstream Live TV and stream regressions
         working-directory: tests
         run: |
-          make -f Makefile.host -j2 test_livetv test_live_watch test_livetv_prefs test_livetv_quality test_stream_request test_stream_budget test_jbuf_order test_userdata
-          for t in test_livetv test_live_watch test_livetv_prefs test_livetv_quality test_stream_request test_stream_budget test_jbuf_order test_userdata; do "./$t"; done
+          make -f Makefile.host -j2 test_livetv test_live_watch test_livetv_prefs test_livetv_quality test_stream_request test_stream_budget test_jbuf_order test_userdata test_auth_data test_settings_model test_settings_model_nostats
+          for t in test_livetv test_live_watch test_livetv_prefs test_livetv_quality test_stream_request test_stream_budget test_jbuf_order test_userdata test_auth_data test_settings_model test_settings_model_nostats; do "./$t"; done
       - name: Companion service tests
         run: |
           if test -d server; then
