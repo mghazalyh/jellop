@@ -14,6 +14,10 @@ jobs:
     timeout-minutes: 35
     steps:
       - uses: actions/checkout@v4
+      - name: Validate Python smoke harness before compilation
+        run: |
+          python3 -m compileall -q tools
+          python3 tools/test_surf_acceptance.py
       - name: Fetch pinned SDK
         run: |
           curl --fail --location --retry 2 --max-time 180 -o tools/ps3dev-linux-X64.tar.gz https://github.com/ps3dev/ps3dev/releases/download/nightly-2026-07-26/ps3dev-linux-X64.tar.gz
