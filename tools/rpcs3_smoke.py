@@ -10,6 +10,81 @@ import time
 from rpcs3_fixture import fixture, TOKEN, USER, CHANNELS, EXCLUDED
 from surf_acceptance import evaluate, evaluate_controls
 
+
+def verify_visual_playback(out):
+    """Fail closed on black, obscured, frozen or grossly unstable fixture output.
+
+    This checks actual X11 scanout, not guest decoded-frame counters. The public
+    fixture is FFmpeg testsrc2, not arbitrary programme material.
+    """
+    width, height, fps, frames = 160, 90, 10, 36
+    frame_bytes = width * height * 3
+    display = os.environ.get("DISPLAY")
+    if not display:
+        raise RuntimeError("Visual acceptance requires the actual X11 display")
+    capture = subprocess.run(
+        ["ffmpeg", "-hide_banner", "-loglevel", "error", "-f", "x11grab",
+         "-draw_mouse", "0", "-framerate", str(fps), "-video_size", "1280x720",
+         "-i", display, "-frames:v", str(frames), "-vf", "scale=160:90",
+         "-pix_fmt", "rgb24", "-f", "rawvideo", "pipe:1"],
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=30, check=True,
+    )
+    if len(capture.stdout) != frames * frame_bytes:
+        raise RuntimeError("Incomplete visual capture")
+    # Retain an independently viewable clip, including failure evidence.
+    subprocess.run(
+        ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
+         "-f", "rawvideo", "-pixel_format", "rgb24", "-video_size", "160x90",
+         "-framerate", str(fps), "-i", "pipe:0", "-c:v", "libx264",
+         "-pix_fmt", "yuv420p", str(out / "visual-proof.mp4")],
+        input=capture.stdout, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        timeout=25, check=True,
+    )
+    # Exclude transport controls at the bottom, but include the centre where
+    # the earlier RPCS3 welcome dialog covered the black playback area.
+    regions = [(16, 9, 80, 36), (80, 9, 144, 36),
+               (16, 36, 80, 63), (80, 36, 144, 63)]
+    offsets = [[(y * width + x) * 3 for y in range(y0, y1)
+                for x in range(x0, x1)] for x0,y0,x1,y1 in regions]
+    roi = [i for group in offsets for i in group]
+    samples = [memoryview(capture.stdout)[i*frame_bytes:(i+1)*frame_bytes]
+               for i in range(frames)]
+    readings, differences, failures = [], [], []
+    for index, frame in enumerate(samples):
+        coverage = []
+        for group in offsets:
+            colourful = sum(max(frame[i:i+3]) >= 75 and
+                             max(frame[i:i+3]) - min(frame[i:i+3]) >= 45
+                             for i in group)
+            coverage.append(colourful / len(group))
+        pale = sum(min(frame[i:i+3]) >= 175 and
+                   max(frame[i:i+3]) - min(frame[i:i+3]) <= 25
+                   for i in roi) / len(roi)
+        readings.append({"frame": index, "colour_coverage": coverage,
+                         "bright_neutral_fraction": pale})
+        if min(coverage) < 0.08 or sum(coverage)/4 < 0.22 or pale > 0.18:
+            failures.append({"frame": index, "reason": "missing fixture colour or obscured video"})
+        if index:
+            prev = samples[index-1]
+            delta = sum(abs(frame[i+j]-prev[i+j]) for i in roi
+                        for j in range(3)) / (len(roi)*3)
+            differences.append(delta)
+            if delta > 35:
+                failures.append({"frame": index, "reason": "gross full-screen instability"})
+    moving = sum(d >= 0.35 for d in differences)
+    if moving < len(differences) * 0.65:
+        failures.append({"reason": "insufficient visual motion", "moving_pairs": moving})
+    proof = {"result": "failed" if failures else "passed", "frames": frames,
+             "fps": fps, "samples": readings, "mean_absolute_differences": differences,
+             "failures": failures,
+             "limitations": "Synthetic X11 scanout check; not physical RSX/HDMI acceptance or subtle jitter proof."}
+    (out/"visual-acceptance.json").write_text(json.dumps(proof, indent=2))
+    if failures:
+        raise RuntimeError("Visual playback rejected: " + json.dumps(failures[:5]))
+    print("Visual playback acceptance passed:", frames, "frames;", moving,
+          "moving adjacent pairs", flush=True)
+    return {"frames": frames, "fps": fps, "moving_pairs": moving}
+
 def main():
     ap=argparse.ArgumentParser()
     ap.add_argument("--emulator",required=True)
@@ -107,9 +182,10 @@ def main():
                         result["controls"]=controls
                         result["excluded_channels"]=EXCLUDED
                         result["public_fixture"]=os.environ.get("JELLOP_PUBLIC_FIXTURE")=="1"
+                        subprocess.run(["import","-window","root",str(out/"screen.png")],timeout=15,check=True)
+                        result["visual"] = verify_visual_playback(out)
                         (out/"result.json").write_text(json.dumps(result,indent=2))
-                        print("Surf acceptance passed:",json.dumps({k:v for k,v in result.items() if k!="sessions"}),flush=True)
-                        subprocess.run(["import","-window","root",str(out/"screen.png")],timeout=15,check=False)
+                        print("Surf and visual acceptance passed:",json.dumps({k:v for k,v in result.items() if k!="sessions"}),flush=True)
                         return
                 time.sleep(1)
             raise RuntimeError("Timed out: "+("guest menu reached; missing catalogue or playback evidence" if guest_started else "guest did not reach main menu"))
