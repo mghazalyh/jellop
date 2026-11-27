@@ -83,7 +83,15 @@ def verify_visual_playback(out):
         raise RuntimeError("Visual playback rejected: " + json.dumps(failures[:5]))
     print("Visual playback acceptance passed:", frames, "frames;", moving,
           "moving adjacent pairs", flush=True)
-    return {"frames": frames, "fps": fps, "moving_pairs": moving}
+    subprocess.run(
+        ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
+         "-f", "x11grab", "-draw_mouse", "0", "-video_size", "1280x720",
+         "-i", display, "-frames:v", "1", "-threads", "1",
+         str(out / "video-playing.png")],
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=15, check=True,
+    )
+    return {"frames": frames, "fps": fps, "moving_pairs": moving,
+            "screenshot": "video-playing.png", "clip": "visual-proof.mp4"}
 
 def main():
     ap=argparse.ArgumentParser()
@@ -102,6 +110,15 @@ def main():
     # Only allow the isolated CI profile; never overwrite a personal profile.
     if not os.environ.get("GITHUB_ACTIONS") or "jellop-rpcs3" not in root.parts:
         raise RuntimeError("This fixture harness requires the dedicated CI profile")
+    # Use the exact GUI settings keys from the pinned RPCS3 source. The prior
+    # passing run had the first-run dialog in front of the game window.
+    # This is only the disposable GitHub Actions emulator profile.
+    gui = root / "GuiConfigs"
+    gui.mkdir(parents=True, exist_ok=True)
+    (gui / "CurrentSettings.ini").write_text(
+        "[main_window]\ninfoBoxEnabledWelcome=false\n"
+        "[GSFrame]\nresize=true\nresizeManual=true\nwidth=1280\nheight=720\n"
+    )
     host=os.environ.get("JELLOP_FIXTURE_HOST","127.0.0.1")
     endpoint="http://"+host+":18096"
     (game/"jellyfin_config.txt").write_text(endpoint+"\nfixture\n"+TOKEN+"\n"+USER+"\n")
