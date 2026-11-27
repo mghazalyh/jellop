@@ -24,7 +24,7 @@ bool xmb_classic_media(int tab) {
 }
 
 bool xmb_classic_livetv(int tab) {
-    return ui_layout() == UI_LAYOUT_CLASSIC && tab >= XMB_TAB_LIB0 &&
+    return (xmb_is_jellop_bridge() || ui_layout() == UI_LAYOUT_CLASSIC) && tab >= XMB_TAB_LIB0 &&
            tab < XMB_TAB_COUNT && xmb_kind(tab) == TABKIND_LIVETV;
 }
 

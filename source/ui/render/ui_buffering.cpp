@@ -28,6 +28,7 @@
 #include "ui_text_gpu.h"
 #include "ui.h"
 #include "ui_visuals.h"
+#include "ui_internal.h" // IPTV presentation mode
 #include "rsxutil.h"
 #include "timing.h"
 #include "watchdog.h"
@@ -198,11 +199,34 @@ void buffering_frame(void) {
     buf_anim_eval(&s_anim, now, &f);
 
     clearScreen(0x00030408);
-    draw_gpu(f);
-    rsxSync();
-    ui_text_gpu_begin();
-    draw_text(f);
-    ui_text_gpu_flush();
+    if (xmb_is_jellop_bridge()) {
+        // A single opaque frame and CPU glyphs: no blended halo, artwork,
+        // textured logo, or GPU text compositing over the previous menu.
+        rsxSync();
+        const int x = XMB_ITEM_PAD;
+        const int y = (int)display_height / 2 - UIS_H(60);
+        const int w = (int)display_width - 2*x;
+        drawTTF((u32)x,(u32)y,"Jellop",UIS_TF(22),XMB_WHITE,true);
+        drawTTF_clipped((u32)x,(u32)(y+UIS_H(40)),s_title,UIS_TF(19),
+                        XMB_TEXT,w,UI_FACE_REGULAR);
+        drawTTF((u32)x,(u32)(y+UIS_H(76)),tr(s_label),UIS_TF(15),XMB_TEXT_DIM);
+        if(s_show_pct) {
+            char pct[16];snprintf(pct,sizeof pct,"%d%%",f.pct);
+            drawTTF((u32)x,(u32)(y+UIS_H(102)),pct,UIS_TF(15),XMB_WHITE);
+            const int progress=f.pct<0?0:(f.pct>100?100:f.pct);
+            drawRect((u32)x,(u32)(y+UIS_H(132)),(u32)w,UIS_H(5),XMB_HAIRLINE);
+            drawRect((u32)x,(u32)(y+UIS_H(132)),(u32)(w*progress/100),UIS_H(5),XMB_ACCENT);
+        }
+        if(s_hint && s_anim.phase==BUF_LOADING) {
+            Hint h[]={{'C',s_hint}};draw_hints_bar(h,1);
+        }
+    } else {
+        draw_gpu(f);
+        rsxSync();
+        ui_text_gpu_begin();
+        draw_text(f);
+        ui_text_gpu_flush();
+    }
     flip();
     s_flip_pending = true;
 #if BUILD_FOR_RPCS3
@@ -290,6 +314,14 @@ bool loading_run(void (*work)(void *), void *arg, const char *label,
         a = a * a * (3.0f - 2.0f * a);
 
         clearScreen(XMB_BG);
+        if (xmb_is_jellop_bridge()) {
+            rsxSync();
+            const char *msg=label&&label[0]?label:"Loading";
+            drawTTF((u32)XMB_ITEM_PAD,(u32)((int)display_height/2),
+                    msg,UIS_TF(18),XMB_WHITE,true);
+            flip();flip_pending=true;
+            continue;
+        }
         wave_draw();
         const int cx = (int)display_width / 2, cy = (int)((float)display_height * 0.46f);
         const float R = (float)UIS_H(40), T = UIS_H(3) < 2 ? 2.0f : (float)UIS_H(3);

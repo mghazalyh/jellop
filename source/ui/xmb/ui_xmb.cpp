@@ -16,12 +16,12 @@
 #include "ui_card_gpu.h"
 #include "ui_text_gpu.h"
 #include "ui_spine.h"      // the README 2.9 spine
+#include "spine.h"         // fixed IPTV navigation depth on both targets
 #include "boot_anim.h"
 #include "thumbnail_cache.h"
 #include "slog.h"
 #if BUILD_FOR_RPCS3
 #include "jf_paths.h"
-#include "spine.h"
 extern bool xmb_livetv_smoke_start(void);
 #endif
 #include "plog.h"
@@ -607,7 +607,11 @@ void ui_run_xmb(void) {
 
     crash_log("13.4 init_btns");
     init_btns();
-    if (xmb_is_jellop_bridge()) xmb_switch_tab(XMB_TAB_LIB0);
+    if (xmb_is_jellop_bridge()) {
+        boot_anim_finish();
+        xmb_switch_tab(XMB_TAB_LIB0);
+        spine_set_level(SPINE_L2);
+    }
     crash_log("13.5 loop enter");
     wd_start();
 
@@ -668,8 +672,11 @@ void ui_run_xmb(void) {
             if (got >= 0) {
                 if (got == 1 && xmb_have_server_tabs()) {
                     plog("xmb: libraries recovered");
-                    if (xmb_is_jellop_bridge() && g_active_tab == XMB_TAB_HOME)
-                        xmb_switch_tab(XMB_TAB_LIB0);
+                    if (xmb_is_jellop_bridge()) {
+                        boot_anim_finish();
+                        if(g_active_tab!=XMB_TAB_SETTINGS)xmb_switch_tab(XMB_TAB_LIB0);
+                        spine_set_level(SPINE_L2);
+                    }
                     if (!g_tabs[g_active_tab].enabled) {
                         for (int t = 0; t < XMB_TAB_COUNT; t++)
                             if (g_tabs[t].enabled) { g_active_tab = t; break; }
@@ -709,10 +716,12 @@ void ui_run_xmb(void) {
         wd_stage("13.5c clearScreen"); if (first_iter) crash_log("13.5c clearScreen");
         clearScreen(XMB_BG);
         wd_stage("13.5d wave_draw"); if (first_iter) crash_log("13.5d wave_draw");
-        wave_snow_ambient();   // a menu: Menu Particles may show here
-        wd_stage("13.5d2 wave_draw");
-        wave_set_plain(ui_layout() == UI_LAYOUT_CLASSIC);
-        wave_draw();
+        if (!xmb_is_jellop_bridge()) {
+            wave_snow_ambient();
+            wd_stage("13.5d2 wave_draw");
+            wave_set_plain(ui_layout() == UI_LAYOUT_CLASSIC);
+            wave_draw();
+        }
         s_fc.gpu += timing_get_us() - t_gpu0;
         wd_stage("13.6 wave_draw done"); if (first_iter) crash_log("13.6 wave_draw done");
 
@@ -731,17 +740,28 @@ void ui_run_xmb(void) {
         input_media_keys_as_shoulders();   // a remote with no L1 / R1
         spine_frame_begin();   // one depth sample for the whole frame
         // The ambient screensaver: a press that wakes it does nothing else.
-        const bool amb_swallow =
+        const bool iptv=xmb_is_jellop_bridge();
+        const bool amb_swallow = !iptv &&
             ambient_update(!xmb_update_popup_active() && !g_overscan_calib);
-        const bool draw_ui = ambient_draw_ui();
+        const bool draw_ui = iptv || ambient_draw_ui();
         bool should_exit = false;
         wd_stage("13.7c2 boot_anim frame");
-        if (boot_anim_xmb_frame())
+        if (!iptv && boot_anim_xmb_frame())
             ;   // cold boot still assembling: a press skips it, nothing else
         else if (amb_swallow)
             ;                           // it only brought the UI back
         else if (xmb_update_popup_active())
             xmb_update_popup_input();   // modal: the screen below keeps focus state
+        else if (iptv) {
+            if (tab==XMB_TAB_SETTINGS && (BTN_PRESSED(l1)||BTN_PRESSED(r1))) {
+                xmb_switch_tab(XMB_TAB_LIB0);
+            } else if(tab==XMB_TAB_SETTINGS) {
+                should_exit=xmb_handle_input_browse();
+            } else {
+                should_exit=xmb_input_livetv();
+            }
+            spine_set_level(SPINE_L2);
+        }
         else if (peek_active())
             peek_input();               // the quick-peek owns the pad while up
         else if (xmb_classic_switch_input(tab))
@@ -816,7 +836,7 @@ void ui_run_xmb(void) {
 
         // Card images go into the FIFO with the wave, ahead of the fence.
         wd_stage("13.7d gpu_phase");
-        if (!g_overscan_calib) {
+        if (!g_overscan_calib && !iptv) {
             if (draw_ui) { xmb_draw_gpu_phase(tab); classic_bar_gpu(tab); }
             else         ambient_gpu();
         }
@@ -832,12 +852,31 @@ void ui_run_xmb(void) {
         // glyph pixels against video memory.  It has to be bracketed: a queued
         // run that nobody submits is invisible text, so only the loop that
         // promises to flush is allowed to queue.  See ui_text_gpu.h.
-        ui_text_gpu_begin();
+        if (!iptv || g_overscan_calib) ui_text_gpu_begin();
 
         if (g_overscan_calib) {
             // Full-screen overscan calibration takeover — no chrome/hints/tabs.
             xmb_overscan_calib_cpu();
             xmb_overscan_calib_text();
+        } else if (iptv) {
+            // CPU-only opaque menu composition on both targets: never mix
+            // cached GPU cards / animated spine chrome with this screen.
+            drawTTF((u32)XMB_ITEM_PAD,(u32)(XMB_OY+UIS_H(26)),"Jellop",UIS_TF(24),XMB_WHITE,true);
+            const char *section=tab==XMB_TAB_SETTINGS?"Settings":"Live TV";
+            drawTTF((u32)(XMB_ITEM_PAD+UIS_W(150)),(u32)(XMB_OY+UIS_H(32)),
+                    section,UIS_TF(16),XMB_TEXT_DIM,true);
+            g_cpu_clip_bot=(int)display_height-XMB_BOTTOM_PAD;
+            if(tab==XMB_TAB_SETTINGS){
+                xmb_cpu_draw_settings();xmb_draw_settings();
+            }else{
+                xmb_cpu_draw_livetv();xmb_draw_livetv();
+            }
+            g_cpu_clip_bot=0;
+            drawRect(0,(u32)((int)display_height-XMB_BOTTOM_PAD),display_width,
+                     (u32)XMB_BOTTOM_PAD,XMB_BG);
+            if(tab==XMB_TAB_SETTINGS)xmb_draw_hints(tab);
+            else xmb_livetv_hints();
+            if(xmb_update_popup_active())xmb_update_popup_draw();
         } else if (!draw_ui) {
             ambient_text();
         } else {
@@ -877,16 +916,16 @@ void ui_run_xmb(void) {
         // is the wait, so the RSX gets the rest of the vblank to draw them.
         wd_stage("13.8e text_flush");
         u64 t_tg0 = timing_get_us();
-        ui_text_gpu_flush();
+        if (!iptv || g_overscan_calib) ui_text_gpu_flush();
         wd_stage("13.8e2 peek");
-        peek_draw_over();              // the quick-peek, over the grid's text
+        if(!iptv)peek_draw_over();
         wd_stage("13.8e3 ambient");
-        ambient_cover_over_ui();       // the dissolve, over everything
+        if(!iptv)ambient_cover_over_ui();
         s_fc.textgpu += timing_get_us() - t_tg0;
 
         // Cold boot: the veil and the travelling mark, over everything above.
         wd_stage("13.8f boot_anim overlay");
-        boot_anim_xmb_overlay();
+        if(!iptv)boot_anim_xmb_overlay();
 
         u64 t_flip0 = timing_get_us();
         wd_stage("13.9 first flip"); if (first_iter) crash_log("13.9 first flip");

@@ -1370,7 +1370,7 @@ bool xmb_input_livetv(void) {
             }
         }
         const bool guide_btn = classic_grid() ? BTN_PRESSED(square) : BTN_PRESSED(right);
-        if (guide_btn && have_guide()) { open_guide(); ui_sfx_play(SFX_CURSOR); }
+        if ((guide_btn || (xmb_is_jellop_bridge()&&BTN_PRESSED(square))) && have_guide()) { open_guide(); ui_sfx_play(SFX_CURSOR); }
         return false;
     }
 
@@ -1407,7 +1407,7 @@ void xmb_livetv_hints(void) {
             h[n].glyph = 'T'; h[n].label = TRN("Favourite"); n++;
             if(xmb_is_jellop_bridge()) { h[n].glyph='3'; h[n].label="Surf (L3)"; n++; }
         }
-        if (have_guide()) { h[n].glyph = classic_grid() ? 'S' : '>'; h[n].label = TRN("Guide"); n++; }
+        if (have_guide()) { h[n].glyph = (classic_grid()||xmb_is_jellop_bridge()) ? 'S' : '>'; h[n].label = TRN("Guide"); n++; }
         // L2 and R2 pair into one "Category" hint (an empty label pairs with the next).
         if (paging() && !s_search_on) {
             h[n].glyph = 'L'; h[n].label = ""; n++;
@@ -1422,7 +1422,9 @@ void xmb_livetv_hints(void) {
         h[n].glyph = 'C'; h[n].label = TRN("List"); n++;
     }
     // Every bar but Search's ends with Square and the visualiser it switches to.
-    if (xmb_classic_livetv(g_active_tab)) {
+    if (xmb_is_jellop_bridge()) {
+        // No inherited wave controls or unreachable Home navigation.
+    } else if (xmb_classic_livetv(g_active_tab)) {
         if (!s_guide && !s_search_on) { h[n].glyph = 'C'; h[n].label = TRN("Back"); n++; }
     } else { h[n].glyph = 'S'; h[n].label = wave_vis_next_label(); n++; }
     draw_hints_bar(h, n);
@@ -1556,7 +1558,7 @@ void xmb_cpu_draw_livetv(void) {
             const int i = s_top + r;
             const LiveRow o = live_row(r, numbers);
             const bool sel = (i == s_sel && xmb_classic_library_header_focus(g_active_tab) < 0);
-            if (!ui_card_gpu_ready()) {
+            if (xmb_is_jellop_bridge() || !ui_card_gpu_ready()) {
                 drawRect((u32)o.x, (u32)o.y, (u32)o.w, (u32)o.h, sel ? XMB_PANEL_HI : XMB_PANEL);
                 if (sel) drawRect((u32)(o.x - UIS_W(4)), (u32)o.y, UIS_W(3), (u32)o.h, XMB_ACCENT);
                 if(!iptv_split())drawRect((u32)o.logo_x, (u32)o.logo_y, (u32)o.logo_w, (u32)o.logo_h, LIVE_CARD_FILL);
@@ -1681,7 +1683,7 @@ static void classic_heading(void) {
 
 void xmb_draw_livetv(void) {
     tick();
-    if (xmb_classic_livetv(g_active_tab)) classic_heading();
+    if (!xmb_is_jellop_bridge() && xmb_classic_livetv(g_active_tab)) classic_heading();
     const int cx = (int)display_width / 2;
     if (!s_ch || s_alloc_failed) {
         const char *m = TR("Live TV is unavailable");
