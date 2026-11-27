@@ -45,6 +45,41 @@ static u32  s_ovl_w = 0, s_ovl_h = 0;
 static int  s_ovl_prev_y0 = 0, s_ovl_prev_y1 = 0;  // rows drawn by last compose
 static int  s_ovl_y0 = 0, s_ovl_y1 = 0;            // rows drawn by this compose
 
+// Only submit screen regions which contain actual HUD pixels. Full-screen
+// transparent quads can obscure the underlying video on some RSX paths;
+// the fixture reproduced black video for exactly the HUD-visible interval.
+// Scan the CPU staging buffer only on compose, never once per video frame.
+struct HudBand { int x0, y0, x1, y1; };
+static const int HUD_MAX_BANDS = 8;
+static HudBand s_ovl_bands[HUD_MAX_BANDS];
+static int s_ovl_band_count = 0;
+
+static void hud_find_bands(void) {
+    s_ovl_band_count = 0;
+    if (!s_ovl_stage || !s_ovl_w || !s_ovl_h) return;
+    const int w = (int)s_ovl_w;
+    const int h = (int)s_ovl_h;
+    const int first = s_ovl_y0 < 0 ? 0 : s_ovl_y0;
+    const int last = s_ovl_y1 > h ? h : s_ovl_y1;
+    for (int y = first; y < last; ++y) {
+        const u32 *row = s_ovl_stage + (u32)y * s_ovl_w;
+        int x0 = 0, x1 = w;
+        while (x0 < w && !(row[x0] & 0xFF000000u)) ++x0;
+        if (x0 == w) continue;
+        while (x1 > x0 && !(row[x1-1] & 0xFF000000u)) --x1;
+        HudBand *band = s_ovl_band_count ? &s_ovl_bands[s_ovl_band_count-1] : NULL;
+        if (band && (band->y1 == y || s_ovl_band_count == HUD_MAX_BANDS)) {
+            if (x0 < band->x0) band->x0 = x0;
+            if (x1 > band->x1) band->x1 = x1;
+            band->y1 = y+1;
+        } else {
+            HudBand next = {x0, y, x1, y+1};
+            s_ovl_bands[s_ovl_band_count++] = next;
+        }
+    }
+}
+
+
 // Everything the overlay's pixels depend on.  Compared memberwise per frame;
 // a change triggers one recompose + upload.  Zero the struct before filling
 // so padding compares clean.
@@ -75,7 +110,7 @@ void hud_overlay_alloc(void) {
     u32 bytes = display_width * display_height * 4;
     if (!s_ovl_stage) s_ovl_stage = (u32*)memalign(128, bytes);
     if (!s_ovl_tex) {
-        s_ovl_tex = (u32*)rsxMemalign(64, bytes);
+        s_ovl_tex = (u32*)rsxMemalign(128, bytes);
         if (s_ovl_tex) rsxAddressToOffset(s_ovl_tex, &s_ovl_tex_off);
     }
     s_ovl_w = display_width;
@@ -84,6 +119,7 @@ void hud_overlay_alloc(void) {
     if (s_ovl_tex)   memset((void*)s_ovl_tex, 0, bytes);
     if (!s_ovl_stage || !s_ovl_tex) plog("hud_ovl: alloc FAILED");
     s_ovl_prev_y0 = s_ovl_prev_y1 = 0;
+    s_ovl_band_count = 0;
     s_ovl_key_valid = false;
 }
 
@@ -91,6 +127,7 @@ void hud_overlay_free(void) {
     // Keep the buffers (see hud_overlay_alloc) — just drop stale state so
     // the next session starts with a clean compose.
     s_ovl_prev_y0 = s_ovl_prev_y1 = 0;
+    s_ovl_band_count = 0;
     s_ovl_key_valid = false;
 }
 
@@ -248,6 +285,7 @@ static void hud_compose(u64 elapsed_us, bool paused, bool scrubbing) {
     else                   hud_body_v3(elapsed_us, paused, scrubbing);
 
     cpu_rt_end();
+    hud_find_bands();
 
     // Upload the union of the previous and current spans so rows the HUD no
     // longer covers (e.g. a closed menu) are cleared on the texture too.
@@ -317,5 +355,18 @@ void hud_draw(u64 elapsed_us, bool paused, bool scrubbing) {
         hud_compose(elapsed_us, paused, scrubbing);
     }
 
-    rsx_draw_hud_overlay(s_ovl_tex_off, s_ovl_w, s_ovl_h);
+    // Keep completely empty rows/columns out of RSX rasterization even
+    // if a driver fails to honour transparent texture pixels. Explicitly
+    // discard alpha zero; retain fractional-alpha blend for the scrim.
+    if (!s_ovl_band_count) return;
+    rsxSetAlphaFunc(context, GCM_GREATER, 0);
+    rsxSetAlphaTestEnable(context, GCM_TRUE);
+    for (int i = 0; i < s_ovl_band_count; ++i) {
+        const HudBand &b = s_ovl_bands[i];
+        rsxSetScissor(context, (u16)b.x0, (u16)b.y0,
+                     (u16)(b.x1-b.x0), (u16)(b.y1-b.y0));
+        rsx_draw_hud_overlay(s_ovl_tex_off, s_ovl_w, s_ovl_h);
+    }
+    rsxSetAlphaTestEnable(context, GCM_FALSE);
+    rsxSetScissor(context, 0, 0, (u16)display_width, (u16)display_height);
 }
