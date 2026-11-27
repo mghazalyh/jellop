@@ -1,7 +1,7 @@
 name: Jellop PS3
 on:
   push:
-    branches: [main, 'engineering/surf-controls', 'engineering/fullscreen-favourites', 'engineering/policy-view', 'engineering/runtime-controls']
+    branches: [main, 'engineering/surf-controls', 'engineering/fullscreen-favourites', 'engineering/policy-view', 'engineering/runtime-controls', 'engineering/visual-render-gate-20261127']
   workflow_dispatch:
 permissions:
   contents: read
@@ -100,7 +100,7 @@ jobs:
           docker build -f tools/Dockerfile.ps3 -t jellop-build:2026-07-26 tools
       - name: Cross-compile and verify package
         run: |
-          docker run --rm -v "$PWD:/build" jellop-build:2026-07-26 make -j2 pkg
+          docker run --rm -v "$PWD:/build" jellop-build:2026-07-26 make -j2 BUILD_FOR_RPCS3=0 pkg
           docker run --rm -v "$PWD:/build:ro" jellop-build:2026-07-26 python3 tools/verify_pkg.py
           mkdir -p dist
           cp JellyFin-PS3.gnpdrm.pkg dist/Jellop.pkg
