@@ -44,6 +44,7 @@
 #include "api_livetv.h"
 #include "api_userdata.h"
 #include "livetv_prefs.h"
+#include "jellop_ui.h"
 #include "livetv.h"
 #include "jf_paths.h"
 #include "jellyfin_api.h"
@@ -80,7 +81,8 @@ const uint64_t DEBOUNCE_US = 250000ULL;             // a moving view asks once i
 //  State
 // ---------------------------------------------------------------------------
 
-JFChannel *s_ch = NULL;     int s_n = 0;            // what is shown
+JFChannel *s_ch = NULL;     int s_n = 0;
+int s_view_total = 0; // actual server total, not just the bounded resident list            // what is shown
 JFProgram *s_pg = NULL;     int s_pn = 0;
 int        s_pg_first = 0, s_pg_rows = 0;           // which rows the guide data is for
 uint64_t   s_pg_win0 = 0;                           // and which window
@@ -165,6 +167,7 @@ struct Job {
     int      cfirst, ccount, gen;                   // the channel window asked for, and which list (s_gen)
     int      mode;                                  // 0 a range, 1 Favourites, 2 Recently watched, 3 a genre
     int      genre;                                 // mode 3: LG_*
+    bool     bridge;                                // snapshot on submitting render thread
     int      n_recent;
     char     recent[LP_MAX_RECENT][LP_ID_MAX];
     char     term[48];                              // a search, or "" for the page
@@ -218,6 +221,27 @@ void worker_main(void *) {
                 n=jf_fetch_excluded_channels(w_ch,MAX_CH,&total);
             } else if (j.mode == 1) {
                 n = jf_fetch_channels_range(w_ch, MAX_CH, 0, MAX_CH, &total, NULL, "&isFavorite=true");
+            } else if (j.mode == 3 && j.bridge) {
+                // Scan all authoritative rows in bounded batches rather than
+                // guessing from the first resident 384 channels.
+                JFChannel batch[25];
+                n=0;total=0;
+                int at=0,server_total=0;
+                do {
+                    int reported=0;
+                    const int got=jf_fetch_channels_range(batch,25,at,25,&reported,NULL);
+                    if(got<0 || reported<0 || reported>MAX_INDEX ||
+                       (at>0 && reported!=server_total) ||
+                       got>25 || (got==0 && at<reported)) { n=-1;break; }
+                    server_total=reported;
+                    for(int i=0;i<got;i++){
+                        if(!(livetv_channel_genres(&batch[i]) >> j.genre & 1u))continue;
+                        if(n<MAX_CH)w_ch[n++]=batch[i];
+                        total++;
+                    }
+                    at+=got;
+                } while(at<server_total);
+                if(n>=0)livetv_sort_channels(w_ch,n);
             } else if (j.mode == 3) {
                 n = jf_fetch_channels_range(w_ch, MAX_CH, 0, MAX_CH, &total, NULL);
                 int k = 0;
@@ -336,11 +360,17 @@ int row_h(void)       { return UIS_H(62); }
 int row_pitch(void)   { return row_h() + UIS_H(8); }
 // The XMB list: wider than the search list, as a row carries a logo, the name
 // and the programme; and a little lower, for the category tabs above it.
+bool iptv_split(void) { return xmb_is_jellop_bridge() && !s_guide; }
 int list_w(void) {
     const int full = (int)display_width - 2 * XMB_ITEM_PAD;
+    if(iptv_split())return full * 62 / 100;
     return full < UIS_W(940) ? full : UIS_W(940);
 }
-int list_x(void)   { return ((int)display_width - list_w()) / 2; }
+int list_x(void) {
+    if(iptv_split())return (int)display_width - XMB_ITEM_PAD - list_w();
+    return ((int)display_width - list_w()) / 2;
+}
+int detail_w(void) { return list_x() - XMB_ITEM_PAD - UIS_W(20); }
 int list_top(void) { return band_top() + UIS_H(16); }
 int rows_visible(void) {
     const int n = (band_bottom() - list_top() + UIS_H(8)) / row_pitch();
@@ -365,8 +395,9 @@ LiveRow live_row(int r, bool numbers) {
     o.logo_w  = o.logo_h * 16 / 9;
     o.logo_x  = (numbers ? o.num_r + UIS_W(14) : o.x + UIS_W(8));
     o.logo_y  = o.y + (o.h - o.logo_h) / 2;
-    o.text_x  = o.logo_x + o.logo_w + UIS_W(18);
-    o.right_w = UIS_W(230);
+    o.text_x  = iptv_split() ? (numbers ? o.num_r + UIS_W(14) : o.x + UIS_W(14))
+                            : o.logo_x + o.logo_w + UIS_W(18);
+    o.right_w = iptv_split() ? UIS_W(160) : UIS_W(230);
     o.right_x = o.x + o.w - UIS_W(18) - o.right_w;
     return o;
 }
@@ -377,7 +408,9 @@ LiveRow live_row(int r, bool numbers) {
 // XMB layout and the guide keep the list.
 struct LiveGrid { int cols, rows, card_w, card_h, stride, x0; };
 const u32 LIVE_CARD_FILL = 0x0A0C12;
-bool classic_grid(void) { return xmb_classic_livetv(g_active_tab) && !s_guide; }
+bool classic_grid(void) {
+    return !xmb_is_jellop_bridge() && xmb_classic_livetv(g_active_tab) && !s_guide;
+}
 LiveGrid live_grid(void) {
     LiveGrid g;
     const int margin = XMB_OX + UIS_W(64), gap_y = UIS_H(10);
@@ -501,6 +534,7 @@ void submit(int kind) {
     memset(&s_job, 0, sizeof s_job);
     s_job.kind = kind;
     s_job.gen = s_gen;
+    s_job.bridge = xmb_is_jellop_bridge();
     if (s_search_on) {
         snprintf(s_job.term, sizeof s_job.term, "%s", s_term);
         s_job.cfirst = 0;
@@ -586,12 +620,18 @@ void build_pages(int want) {
     int bases[MAX_PAGES], keys[MAX_PAGES], genres[LG_COUNT], ng = 0;
     for (int i = 0; i < s_raw_n; i++) bases[i] = CATS[s_raw_cat[i]].base;
     for (int g = 0; g < LG_COUNT; g++) if (s_gcount[g] >= GENRE_MIN) genres[ng++] = LP_GENRE(g);
-    int n = lp_build_pages_ex(&s_prefs, bases, s_raw_n, genres, ng, keys, MAX_PAGES-(s_policy_supported?1:0));
-    if(s_policy_supported)keys[n++]=LP_POLICY;
+    const bool bridge=xmb_is_jellop_bridge();
+    int n=bridge ? jellop_ui_categories(keys,MAX_PAGES,s_policy_supported)
+                 : lp_build_pages_ex(&s_prefs,bases,s_raw_n,genres,ng,keys,MAX_PAGES-(s_policy_supported?1:0));
+    if(!bridge && s_policy_supported)keys[n++]=LP_POLICY;
     s_npages = 0;
     for (int k = 0; k < n; k++) {
         Page &pg = s_pages[s_npages++];
         pg.key = keys[k]; pg.first = 0; pg.count = 0; pg.cat = -1;
+        if(bridge && keys[k]==1){
+            pg.first=0;pg.count=s_nnums;pg.cat=0;
+            continue;
+        }
         for (int r = 0; r < s_raw_n; r++)
             if (keys[k] > 0 && bases[r] == keys[k]) {
                 pg.first = s_raw_first[r]; pg.count = s_raw_count[r]; pg.cat = s_raw_cat[r];
@@ -643,6 +683,7 @@ void collect(void) {
             if (s_sel >= 0 && s_sel < s_n) snprintf(keep, sizeof keep, "%s", s_ch[s_sel].id);
             memcpy(s_ch, w_ch, sizeof(JFChannel) * (size_t)w_n);
             s_n = w_n;
+            s_view_total = w_ctotal >= w_n ? w_ctotal : w_n;
             if(j.mode==4)s_policy_total=w_ctotal;
             s_loaded = true; s_failed = false;
             int at = -1;
@@ -721,7 +762,7 @@ void tick(void) {
 // it until the new one arrives, and let anything still on its way be dropped.
 void list_changed(void) {
     s_gen++;
-    s_n = 0; s_pn = 0; s_policy_total=0;
+    s_n = 0; s_pn = 0; s_policy_total=0; s_view_total=0;
     s_loaded = false; s_failed = false;
     s_sel = 0; s_top = 0;
     s_pg_rows = 0;
@@ -776,7 +817,9 @@ void cat_label(int cat, char *out, int cap) {
 }
 
 void key_label(int key, int cat, char *out, int cap) {
-    if (LP_IS_GENRE(key) && LP_GENRE_OF(key) < LG_COUNT)
+    if (xmb_is_jellop_bridge() && key==LP_GENRE(LG_MOVIES))
+        snprintf(out,(size_t)cap,"%s","Movies & Series");
+    else if (LP_IS_GENRE(key) && LP_GENRE_OF(key) < LG_COUNT)
         snprintf(out, (size_t)cap, "%s", tr(GENRE_LABEL[LP_GENRE_OF(key)]));
     else if (key == LP_FAVS)        snprintf(out, (size_t)cap, "%s", TR("Favourites"));
     else if (key == LP_RECENT) snprintf(out, (size_t)cap, "%s", TR("Recently watched"));
@@ -1260,7 +1303,7 @@ bool xmb_input_livetv(void) {
     if (BTN_PRESSED(r1)) { s_guide = false; xmb_switch_tab(xmb_next_enabled(g_active_tab, +1)); return false; }
     if (!s_guide && !s_in_details) {
         if (BTN_PRESSED(select)) { search_ask(); return false; }
-        if (BTN_PRESSED(start) && paging() && !s_search_on) { customise(); return false; }
+        if (BTN_PRESSED(start) && paging() && !s_search_on && !xmb_is_jellop_bridge()) { customise(); return false; }
         if (s_search_on && BTN_PRESSED(circle)) { search_end(); ui_sfx_play(SFX_CANCEL); return false; }
         if (paging() && !s_search_on) {
             if (BTN_PRESSED(l2)) { set_page(s_page - 1); ui_sfx_play(SFX_CURSOR); return false; }
@@ -1362,6 +1405,7 @@ void xmb_livetv_hints(void) {
         if(!policy_page()){
             h[n].glyph = 'X'; h[n].label = TRN("Watch"); n++;
             h[n].glyph = 'T'; h[n].label = TRN("Favourite"); n++;
+            if(xmb_is_jellop_bridge()) { h[n].glyph='3'; h[n].label="Surf (L3)"; n++; }
         }
         if (have_guide()) { h[n].glyph = classic_grid() ? 'S' : '>'; h[n].label = TRN("Guide"); n++; }
         // L2 and R2 pair into one "Category" hint (an empty label pairs with the next).
@@ -1370,7 +1414,7 @@ void xmb_livetv_hints(void) {
             h[n].glyph = 'R'; h[n].label = TRN("Category"); n++;
         }
         h[n].glyph = 'B'; h[n].label = TRN("Search"); n++;
-        if (paging() && !s_search_on) { h[n].glyph = 'A'; h[n].label = TRN("Customise"); n++; }
+        if (paging() && !s_search_on && !xmb_is_jellop_bridge()) { h[n].glyph = 'A'; h[n].label = TRN("Customise"); n++; }
         if (s_search_on) { h[n].glyph = 'C'; h[n].label = TRN("Back"); n++; }
     } else {
         h[n].glyph = 'X'; h[n].label = TRN("Watch / details"); n++;
@@ -1417,7 +1461,7 @@ void xmb_livetv_gpu(void) {
             const LiveRow o = live_row(r, numbers);
             const u32 fill = (focus && s_top + r == s_sel) ? XMB_PANEL_HI : XMB_PANEL;
             wave_draw_rrect_outline_gpu(o.x, o.y, o.w, o.h, UIS_H(8), 1, XMB_HAIRLINE, 255, fill, fill, 225);
-            wave_draw_rrect_gpu(o.logo_x, o.logo_y, o.logo_w, o.logo_h, UIS_H(6),
+            if(!iptv_split())wave_draw_rrect_gpu(o.logo_x, o.logo_y, o.logo_w, o.logo_h, UIS_H(6),
                                 LIVE_CARD_FILL, LIVE_CARD_FILL, 255);
         }
         const int rel = s_sel - s_top;
@@ -1502,6 +1546,10 @@ void xmb_cpu_draw_livetv(void) {
     }
 
     if (!s_guide) {
+        if(iptv_split() && detail_w()>0) {
+            drawRect((u32)XMB_ITEM_PAD,(u32)list_top(),(u32)detail_w(),
+                     (u32)(band_bottom()-list_top()),XMB_PANEL);
+        }
         const int vis = rows_visible();
         const bool numbers = list_numbers();
         for (int r = 0; r < vis && s_top + r < s_n; r++) {
@@ -1511,11 +1559,11 @@ void xmb_cpu_draw_livetv(void) {
             if (!ui_card_gpu_ready()) {
                 drawRect((u32)o.x, (u32)o.y, (u32)o.w, (u32)o.h, sel ? XMB_PANEL_HI : XMB_PANEL);
                 if (sel) drawRect((u32)(o.x - UIS_W(4)), (u32)o.y, UIS_W(3), (u32)o.h, XMB_ACCENT);
-                drawRect((u32)o.logo_x, (u32)o.logo_y, (u32)o.logo_w, (u32)o.logo_h, LIVE_CARD_FILL);
+                if(!iptv_split())drawRect((u32)o.logo_x, (u32)o.logo_y, (u32)o.logo_w, (u32)o.logo_h, LIVE_CARD_FILL);
             }
             // The logo, square, in the middle of its tile, as on Classic's cards.
             const int ls = o.logo_h - UIS_H(6);
-            draw_logo(&s_ch[i], o.logo_x + (o.logo_w - ls) / 2, o.logo_y + (o.logo_h - ls) / 2, ls, ls);
+            if(!iptv_split())draw_logo(&s_ch[i], o.logo_x + (o.logo_w - ls) / 2, o.logo_y + (o.logo_h - ls) / 2, ls, ls);
             // The programme's progress, between its times and what is next.
             NowNext nn;
             now_next(&s_ch[i], now, &nn);
@@ -1648,7 +1696,8 @@ void xmb_draw_livetv(void) {
         snprintf(line, sizeof line, TR("Search: %s  (%d found)  -  {O} to go back"), s_term, s_n);
         drawTTF_rich((u32)list_x(), (u32)(list_top() - UIS_H(30)), line, UIS_TF(14), XMB_ACCENT_ALT, false);
     } else if (paging() && !s_guide) {
-        draw_cat_tabs(list_x(), list_top() - UIS_H(32), list_x() + list_w() - UIS_W(90), false);
+        const int cat_x=iptv_split()?XMB_ITEM_PAD:list_x();
+        draw_cat_tabs(cat_x,list_top()-UIS_H(32),list_x()+list_w()-UIS_W(90),false);
     }
     if (s_n <= 0) {
         const char *m = s_failed ? TR("Couldn't load the channel list")
@@ -1663,6 +1712,30 @@ void xmb_draw_livetv(void) {
         return;
     }
     const uint64_t now = jf_now_ticks();
+
+    if(iptv_split() && s_sel>=0 && s_sel<s_n && detail_w()>UIS_W(40)) {
+        const JFChannel *c=&s_ch[s_sel];
+        const int x=XMB_ITEM_PAD+UIS_W(16), y=list_top()+UIS_H(16);
+        const int w=detail_w()-UIS_W(32);
+        NowNext nn={};now_next(c,now,&nn);
+        clip_draw(x,y,"SELECTED CHANNEL",UIS_TF(12),XMB_ACCENT_ALT,w,true);
+        clip_draw(x,y+UIS_H(27),c->name,UIS_TF(21),XMB_WHITE,w,true);
+        clip_draw(x,y+UIS_H(64),nn.now[0]?nn.now:"Programme information unavailable",
+                  UIS_TF(15),XMB_TEXT,w,false);
+        if(nn.next[0])clip_draw(x,y+UIS_H(91),nn.next,UIS_TF(13),XMB_TEXT_DIM,w,false);
+        if(c->favourite)clip_draw(x,y+UIS_H(122),"Favourite",UIS_TF(14),XMB_ACCENT_ALT,w,true);
+        char count[96];
+        snprintf(count,sizeof count,"%d of %d channels loaded",s_n,s_view_total>s_n?s_view_total:s_n);
+        clip_draw(x,y+UIS_H(150),count,UIS_TF(13),XMB_TEXT_DIM,w,false);
+        if(!policy_page()){
+            clip_draw(x,y+UIS_H(188),"X   Watch fullscreen",UIS_TF(16),XMB_WHITE,w,true);
+            clip_draw(x,y+UIS_H(216),"L3  Start / resume Surf",UIS_TF(14),XMB_TEXT,w,false);
+            clip_draw(x,y+UIS_H(243),"Triangle  Favourite",UIS_TF(14),XMB_TEXT,w,false);
+        }else clip_draw(x,y+UIS_H(188),"Excluded - playback disabled",UIS_TF(14),XMB_TEXT_DIM,w,true);
+        clip_draw(x,y+UIS_H(281),"Select  Search channels",UIS_TF(13),XMB_TEXT_DIM,w,false);
+        clip_draw(x,y+UIS_H(307),"L2 / R2  Categories",UIS_TF(13),XMB_TEXT_DIM,w,false);
+        clip_draw(x,y+UIS_H(333),"L1 / R1  Settings",UIS_TF(13),XMB_TEXT_DIM,w,false);
+    }
 
     if (classic_grid()) {
         const LiveGrid g = live_grid();
@@ -1741,7 +1814,8 @@ void xmb_draw_livetv(void) {
         // Where the selection is in the list, at the right of the tabs.
         char pos[24];
         snprintf(pos, sizeof pos, "%d / %d", s_sel + 1,
-                 policy_page()&&s_policy_total>s_n?s_policy_total:s_n);
+                 iptv_split()&&s_view_total>s_n?s_view_total:
+                 (policy_page()&&s_policy_total>s_n?s_policy_total:s_n));
         const int pw = ttf_text_width(pos, UIS_TF(14));
         drawTTF((u32)(list_x() + list_w() - pw), (u32)(list_top() - UIS_H(30)), pos, UIS_TF(14), XMB_TEXT_FAINT);
         return;

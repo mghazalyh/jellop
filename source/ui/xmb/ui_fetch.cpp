@@ -76,6 +76,8 @@ static void adopt_server(const char *addr) {
 static bool detect_tabs_parse(int status, const char *buf, bool bridge) {
     s_detect_status = status;
     s_jellop_bootstrap = false;
+    g_tabs[XMB_TAB_HOME].enabled = true;
+    g_tabs[XMB_TAB_SEARCH].enabled = true;
     for (int t = XMB_TAB_LIB0; t < XMB_TAB_COUNT; t++)
         memset(&g_tabs[t], 0, sizeof(g_tabs[t]));
     int next = XMB_TAB_LIB0;
@@ -197,7 +199,16 @@ static bool detect_tabs_parse(int status, const char *buf, bool bridge) {
         return false;
     }
     s_jellop_bootstrap = bridge;
-    add_media_tab(next);
+    if (bridge) {
+        // The IPTV application is the channel browser plus connection
+        // settings. Search is already integrated into Live TV (Select).
+        // Do not expose dead Jellyfin Home, VOD or local-media navigation.
+        g_tabs[XMB_TAB_HOME].enabled = false;
+        g_tabs[XMB_TAB_SEARCH].enabled = false;
+        plog("Jellop: native IPTV-first shell");
+    } else {
+        add_media_tab(next);
+    }
     return true;
 }
 

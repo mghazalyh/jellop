@@ -18,6 +18,10 @@ Optional declarative runtime configuration is supported by the bridge. It is bou
 
 Native channel switching explicitly closes the previous bridge transcode using the existing Jellyfin stop endpoint. Session and token checks prevent unrelated sessions from stopping it.
 
+## IPTV-first native interface
+
+With the authenticated Jellop bridge, the client exposes Live TV and Settings rather than the inherited Jellyfin Home, Search and local-media tabs. The channel browser uses a text-first split view: selected channel/programme and controller commands on the left, a bounded channel list on the right. All Channels, Favourites, Sports, Movies & Series, Hiatus / Banned and Recently watched are fixed IPTV scopes. Select searches the channel list; L2/R2 switches scopes; X opens the existing fullscreen hardware player; L3 starts/resumes Surf. No second video surface, poster cache or Flutter runtime is introduced. Ordinary Jellyfin retains its native library interface. The 384-row resident/Surf limit remains; the interface reports the actual total rather than hiding truncation. Physical and visual acceptance is still required.
+
 ## Storage and retry isolation
 
 Jellop uses its own `/dev_hdd0/tmp/jellop` scratch directory, separate PS3 savedata identity, and `jellop_offline` media directories. It does not import the original application's temporary login or preferences. Login errors are logged as status codes only. Surf keeps the sole healthy channel instead of manufacturing cycle rollovers. Failed opens receive a five-minute local cooldown, never an automatic gateway ban. The existing native save-data fallback may lose scratch state after a reboot; permanent save failures are logged rather than claimed as successful.
