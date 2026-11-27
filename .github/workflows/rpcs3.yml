@@ -5,11 +5,21 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
+  statuses: write
 concurrency:
   group: jellop-rpcs3-${{ github.ref }}
   cancel-in-progress: true
 jobs:
+  announce:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Publish exact run URL for acceptance tracking
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api --method POST "repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" -f state=pending -f context=jellop/visual-acceptance -f description='RPCS3 visual acceptance running' -f target_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
   emulator-package:
+    needs: announce
     runs-on: ubuntu-24.04
     timeout-minutes: 35
     steps:
@@ -125,3 +135,17 @@ jobs:
           path: smoke/
           if-no-files-found: warn
           retention-days: 7
+  report:
+    if: always()
+    needs: [announce, emulator-package, emulator-smoke]
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Publish visual acceptance outcome
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PACKAGE_RESULT: ${{ needs.emulator-package.result }}
+          SMOKE_RESULT: ${{ needs.emulator-smoke.result }}
+        run: |
+          state=failure
+          if test "$PACKAGE_RESULT" = success && test "$SMOKE_RESULT" = success; then state=success; fi
+          gh api --method POST "repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" -f state="$state" -f context=jellop/visual-acceptance -f description="Package: $PACKAGE_RESULT; visual: $SMOKE_RESULT" -f target_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
